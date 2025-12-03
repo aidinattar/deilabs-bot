@@ -1,11 +1,10 @@
-# src/deilabs_bot/client.py
 import os
 from datetime import datetime
 
 from playwright.sync_api import sync_playwright, Page
 
 from .config import DeilabsConfig, DEILABS_URL, LAB_IN_OUT_URL
-from .selectors import LAB_SELECTORS, ENTER_BUTTON_SELECTORS
+from .selectors import LAB_SELECTORS, ENTER_BUTTON_SELECTORS, EXIT_BUTTON_SELECTORS
 from .logger import Logger
 
 
@@ -260,6 +259,114 @@ class DeilabsClient:
 
             browser.close()
             return msg
+        
+    def leave_lab(self) -> str:
+        """
+        Leave the lab if currently inside.
+
+        - Se sessione scaduta -> lo segnala
+        - Se non sei dentro -> messaggio coerente (anche se i lab sono chiusi)
+        - Se sei dentro -> clicca 'Exit from lab' e verifica.
+        """
+        Logger.log(
+            "leave_start",
+            "Trying to leave lab...",
+            url=LAB_IN_OUT_URL,
+            user_id=self.config.user_id,
+        )
+
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.firefox.launch(headless=True)
+            context = browser.new_context(storage_state=self.config.storage_state_path)
+            page = context.new_page()
+
+            page.goto(LAB_IN_OUT_URL)
+            page.wait_for_timeout(2000)
+
+            if "login" in page.url or "shibboleth" in page.url:
+                msg = (
+                    "Session expired: please run the interactive login again "
+                    f"for user_id={self.config.user_id}."
+                )
+                Logger.log(
+                    "leave_session_expired",
+                    msg,
+                    level="WARNING",
+                    url=page.url,
+                    user_id=self.config.user_id,
+                    success=False,
+                )
+                browser.close()
+                return msg
+
+            if not self._is_inside_lab(page):
+                # Non sei dentro: distinguiamo lab chiusi o no
+                if self._are_labs_closed(page):
+                    msg = "You are not in any lab and laboratories are currently closed."
+                else:
+                    msg = "You are not in any lab."
+                Logger.log(
+                    "leave_not_inside",
+                    msg,
+                    url=page.url,
+                    user_id=self.config.user_id,
+                    success=True,
+                )
+                browser.close()
+                return msg
+
+            clicked = False
+            for sel in EXIT_BUTTON_SELECTORS:
+                try:
+                    page.click(sel)
+                    Logger.log(
+                        "click_exit",
+                        f"Clicked Exit via selector {sel}",
+                        url=page.url,
+                        user_id=self.config.user_id,
+                    )
+                    clicked = True
+                    break
+                except Exception:
+                    continue
+
+            if not clicked:
+                self.save_state(page, "no_exit_button")
+                msg = "Could not find Exit button."
+                Logger.log(
+                    "leave_no_button",
+                    msg,
+                    level="ERROR",
+                    url=page.url,
+                    user_id=self.config.user_id,
+                    success=False,
+                )
+                browser.close()
+                return msg
+
+            page.wait_for_timeout(2000)
+
+            # Ricontrollo stato
+            if self._is_inside_lab(page):
+                self.save_state(page, "exit_uncertain")
+                msg = "Tried to leave lab, but status is uncertain (still appears inside)."
+                success = False
+            else:
+                msg = "You have exited the lab."
+                success = True
+
+            Logger.log(
+                "leave_result",
+                msg,
+                url=page.url,
+                user_id=self.config.user_id,
+                success=success,
+            )
+            browser.close()
+            return msg
+
 
     def get_status(self) -> str:
         """
