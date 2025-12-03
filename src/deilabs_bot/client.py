@@ -260,3 +260,73 @@ class DeilabsClient:
 
             browser.close()
             return msg
+
+    def get_status(self) -> str:
+        """
+        Check current status without changing anything.
+
+        Possibili risultati:
+        - "Session expired ..."
+        - "Laboratories are currently closed ..."
+        - "You are already inside the lab."
+        - "You are not in any lab."
+        """
+        Logger.log(
+            "status_start",
+            "Checking lab status...",
+            url=LAB_IN_OUT_URL,
+            user_id=self.config.user_id,
+        )
+
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.firefox.launch(headless=True)
+            context = browser.new_context(storage_state=self.config.storage_state_path)
+            page = context.new_page()
+
+            page.goto(LAB_IN_OUT_URL)
+            page.wait_for_timeout(2000)
+
+            if "login" in page.url or "shibboleth" in page.url:
+                msg = (
+                    "Session expired: please run the interactive login again "
+                    f"for user_id={self.config.user_id}."
+                )
+                Logger.log(
+                    "status_session_expired",
+                    msg,
+                    level="WARNING",
+                    url=page.url,
+                    user_id=self.config.user_id,
+                    success=False,
+                )
+                browser.close()
+                return msg
+
+            if self._are_labs_closed(page):
+                msg = "Laboratories are currently closed."
+                Logger.log(
+                    "status_labs_closed",
+                    msg,
+                    url=page.url,
+                    user_id=self.config.user_id,
+                    success=True,
+                )
+                browser.close()
+                return msg
+
+            if self._is_inside_lab(page):
+                msg = "You are already inside the lab."
+            else:
+                msg = "You are not in any lab."
+
+            Logger.log(
+                "status_result",
+                msg,
+                url=page.url,
+                user_id=self.config.user_id,
+                success=True,
+            )
+            browser.close()
+            return msg
