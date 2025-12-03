@@ -71,24 +71,65 @@ def parse_args():
         help="Enable debug mode (save screenshots and HTML).",
     )
 
+    # status
+    status_parser = subparsers.add_parser("status", help="Check current lab status (no changes).")
+    status_parser.add_argument("--user-id", required=True, help="User id")
+
+    # exit
+    exit_parser = subparsers.add_parser("exit", help="Leave the lab if you are inside.")
+    exit_parser.add_argument("--user-id", required=True, help="User id")
+
+    # setlab
+    setlab_parser = subparsers.add_parser(
+        "setlab", help="Set default lab name for this user."
+    )
+    setlab_parser.add_argument("--user-id", required=True, help="User id")
+    setlab_parser.add_argument("--lab", required=True, help="Lab name as shown in the site.")
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    cmd = args.command
 
-    config = DeilabsConfig(
-        user_id=str(args.user_id),
-        lab_name=args.lab,
-        debug=getattr(args, "debug", False),
-    )
-    client = DeilabsClient(config)
+    user_id = str(getattr(args, "user_id", ""))
 
-    if args.command == "login":
+    if cmd == "setlab":
+        set_lab_for_user(user_id, args.lab)
+        print(f"Default lab for user {user_id} set to: {args.lab}")
+        return
+
+    if cmd == "status":
+        lab = resolve_lab(user_id, getattr(args, "lab", None))
+        config = DeilabsConfig(user_id=user_id, lab_name=lab)
+        client = DeilabsClient(config)
+        msg = client.get_status()
+        print(msg)
+        return
+
+    if cmd == "exit":
+        lab = resolve_lab(user_id, getattr(args, "lab", None))
+        config = DeilabsConfig(user_id=user_id, lab_name=lab)
+        client = DeilabsClient(config)
+        msg = client.leave_lab()
+        print(msg)
+        return
+
+    if cmd == "login":
+        lab = resolve_lab(user_id, getattr(args, "lab", None))
+        config = DeilabsConfig(user_id=user_id, lab_name=lab, debug=True)
+        client = DeilabsClient(config)
         client.interactive_login()
-    elif args.command == "punch":
+        return
+
+    if cmd == "punch":
+        lab = resolve_lab(user_id, getattr(args, "lab", None))
+        config = DeilabsConfig(user_id=user_id, lab_name=lab, debug=getattr(args, "debug", False))
+        client = DeilabsClient(config)
         msg = client.ensure_presence()
         print(msg)
+        return
 
 
 if __name__ == "__main__":
