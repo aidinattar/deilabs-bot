@@ -1,0 +1,18 @@
+[project]
+name = "deilabs-bot"
+version = "0.1.0"
+description = "Automated DeiLabs presence logging (CLI + Telegram bot)"
+authors = [{name="Aidin Attar"}]
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+    "playwright",
+    "python-telegram-bot>=21.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+deilabs = "deilabs_bot.cli:main"
