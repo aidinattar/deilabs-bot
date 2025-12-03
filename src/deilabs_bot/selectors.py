@@ -10,3 +10,8 @@ ENTER_BUTTON_SELECTORS = [
     "button.btn-primary",
     "button[type=submit']",
 ]
+
+EXIT_BUTTON_SELECTORS = [
+    "button:has-text('Exit from lab')",
+    "input[type=submit][value^='Exit from lab']",
+]
