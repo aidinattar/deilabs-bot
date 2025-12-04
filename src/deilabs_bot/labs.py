@@ -59,3 +59,5 @@ LAB_CHOICES = (
     "DEI/S | Centro Sonologia Computazionale - Restauro Audio",
     "DEI/S | Informatica Musicale ",
 )
+
+LABS_PER_PAGE = 6
