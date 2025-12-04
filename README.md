@@ -2,7 +2,7 @@
 
 This project provides:
 
-1. A **Python CLI** to interact with the DeiLabs platform (https://deilabs.dei.unipd.it/) using Playwright.
+1. A **Python CLI** to interact with the [DeiLabs platform](https://deilabs.dei.unipd.it/) using Playwright.
 2. A **Telegram bot** that can check your presence status, enter/exit a laboratory, and manage your preferences, using a previously saved authenticated session.
 
 **Important:**  
