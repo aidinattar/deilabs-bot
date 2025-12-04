@@ -16,12 +16,13 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+    CallbackQueryHandler,
 )
 
 from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
-from .labs   import LAB_CHOICES
+from .labs   import LAB_CHOICES, LABS_PER_PAGE
 
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -64,11 +65,39 @@ def resolve_lab(user_id: str, override: Optional[str] = None) -> str:
         return saved
     return "DEI/A | 230 DEI/A"
 
+def build_lab_keyboard(page: int = 0) -> InlineKeyboardMarkup:
+    """Build a paginated inline keyboard for selecting a lab."""
+    total = len(LAB_CHOICES)
+    max_page = (total - 1) // LABS_PER_PAGE
+
+    page = max(0, min(page, max_page))
+
+    start = page * LABS_PER_PAGE
+    end = min(start + LABS_PER_PAGE, total)
+
+    buttons = []
+
+    for i in range(start, end):
+        lab = LAB_CHOICES[i]
+        buttons.append(
+            [InlineKeyboardButton(lab, callback_data=f"setlab:{i}")]
+        )
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅ Prev", callback_data=f"setlab_page:{page-1}"))
+    if page < max_page:
+        nav_row.append(InlineKeyboardButton("Next ➡", callback_data=f"setlab_page:{page+1}"))
+
+    if nav_row:
+        buttons.append(nav_row)
+
+    return InlineKeyboardMarkup(buttons)
+
 
 # ---------------------------------------------------------------------
-# Wrapper sync → async: usare DeilabsClient in un thread separato
+# Wrapper sync → async
 # ---------------------------------------------------------------------
-
 def run_ensure_presence(user_id: str, lab_name: str) -> str:
     cfg = DeilabsConfig(user_id=user_id, lab_name=lab_name, debug=False)
     client = DeilabsClient(cfg)
@@ -98,9 +127,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"Hi {user.first_name}!\n\n"
         f"Your Telegram ID is: `{uid}`.\n\n"
-        "To enable logging from Telegram, first log in once from a machine with a GUI:\n\n"
+        "Before using this bot, make sure you have already selected your *preferred laboratories* "
+        "on the DeiLabs website (Labs in/out → Preferred labs page).\n\n"
+        "Then, you must connect your UniPD session once from a machine with a GUI:\n\n"
         f"`deilabs login --user-id {uid}`\n\n"
-        "Then you can use the buttons below or the commands:\n"
+        "After that, you can use the buttons or commands:\n"
         "• `/setlab` – set your default lab\n"
         "• `/status` – check your current status\n"
         "• `/punch` – enter the lab if needed\n"
@@ -143,17 +174,8 @@ async def setlab_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    buttons = []
-    row = []
-    for i, lab in enumerate(LAB_CHOICES, start=1):
-        row.append(InlineKeyboardButton(lab, callback_data=f"setlab:{lab}"))
-        if i % 2 == 0:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-
-    markup = InlineKeyboardMarkup(buttons)
+    # show lab selection keyboard
+    markup = build_lab_keyboard(page=0)
 
     await update.message.reply_text(
         "Select your default lab from the list below:",
@@ -163,20 +185,38 @@ async def setlab_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def setlab_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()  # ferma la rotellina di Telegram
+    await query.answer()
 
     user = query.from_user
     uid = str(user.id)
 
-    data = query.data  # es. "setlab:DEI/A | 230 DEI/A"
-    _, lab_name = data.split(":", 1)
+    data = query.data
+    _, idx_str = data.split(":", 1)
+    idx = int(idx_str)
 
-    set_lab_for_user(uid, lab_name)
+    if 0 <= idx < len(LAB_CHOICES):
+        lab_name = LAB_CHOICES[idx]
+        set_lab_for_user(uid, lab_name)
+        await query.edit_message_text(
+            f"Default lab for your account has been set to:\n{lab_name}"
+        )
+    else:
+        await query.edit_message_text(
+            "Invalid lab selection. Please try /setlab again."
+        )
 
-    # Aggiorna il messaggio con conferma
-    await query.edit_message_text(
-        f"Default lab for your account has been set to:\n{lab_name}"
-    )
+
+async def setlab_page_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    _, page_str = data.split(":", 1)
+    page = int(page_str)
+
+    markup = build_lab_keyboard(page=page)
+
+    await query.edit_message_reply_markup(reply_markup=markup)
 
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,9 +266,7 @@ async def exit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(result)
 
-# ---------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------
+
 def main():
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set.")
@@ -241,6 +279,9 @@ def main():
     application.add_handler(CommandHandler("status", status_cmd))
     application.add_handler(CommandHandler("punch", punch_cmd))
     application.add_handler(CommandHandler("exit", exit_cmd))
+
+    application.add_handler(CallbackQueryHandler(setlab_button, pattern=r"^setlab:\d+$"))
+    application.add_handler(CallbackQueryHandler(setlab_page_button, pattern=r"^setlab_page:\d+$"))
 
     Logger.log("bot_start", "Telegram bot started.", user_id=None)
     application.run_polling()
