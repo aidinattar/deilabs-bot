@@ -5,7 +5,13 @@ import asyncio
 from functools import partial
 from typing import Dict, Any, Optional
 
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+)
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -15,11 +21,11 @@ from telegram.ext import (
 from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
+from .labs   import LAB_CHOICES
 
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PREFS_FILE = "user_prefs.json"
-
 
 # ---------------------------------------------------------------------
 # Preferences helpers
@@ -92,10 +98,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"Hi {user.first_name}!\n\n"
         f"Your Telegram ID is: `{uid}`.\n\n"
-        "To enable logging from Telegram, you must first log in once from a machine with a GUI:\n\n"
+        "To enable logging from Telegram, first log in once from a machine with a GUI:\n\n"
         f"`deilabs login --user-id {uid}`\n\n"
-        "Then you can use:\n"
-        "• `/setlab <name>` – set your default lab\n"
+        "Then you can use the buttons below or the commands:\n"
+        "• `/setlab` – set your default lab\n"
         "• `/status` – check your current status\n"
         "• `/punch` – enter the lab if needed\n"
         "• `/exit` – leave the lab\n"
@@ -104,7 +110,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if lab:
         msg += f"\nCurrent default lab: `{lab}`"
 
-    await update.message.reply_markdown(msg)
+    keyboard = ReplyKeyboardMarkup(
+        [["/status", "/punch"], ["/exit", "/setlab"]],
+        resize_keyboard=True,
+    )
+
+    await update.message.reply_markdown(msg, reply_markup=keyboard)
 
 
 async def login_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -123,18 +134,47 @@ async def setlab_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     uid = str(user.id)
 
-    if not context.args:
+    # manual lab name provided
+    if context.args:
+        lab_name = " ".join(context.args).strip()
+        set_lab_for_user(uid, lab_name)
         await update.message.reply_text(
-            "Usage: /setlab <lab name>\n\n"
-            "Example:\n"
-            "/setlab DEI/A | 230 DEI/A"
+            f"Default lab for your account has been set to:\n{lab_name}"
         )
         return
 
-    lab_name = " ".join(context.args).strip()
-    set_lab_for_user(uid, lab_name)
+    buttons = []
+    row = []
+    for i, lab in enumerate(LAB_CHOICES, start=1):
+        row.append(InlineKeyboardButton(lab, callback_data=f"setlab:{lab}"))
+        if i % 2 == 0:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    markup = InlineKeyboardMarkup(buttons)
 
     await update.message.reply_text(
+        "Select your default lab from the list below:",
+        reply_markup=markup,
+    )
+
+
+async def setlab_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # ferma la rotellina di Telegram
+
+    user = query.from_user
+    uid = str(user.id)
+
+    data = query.data  # es. "setlab:DEI/A | 230 DEI/A"
+    _, lab_name = data.split(":", 1)
+
+    set_lab_for_user(uid, lab_name)
+
+    # Aggiorna il messaggio con conferma
+    await query.edit_message_text(
         f"Default lab for your account has been set to:\n{lab_name}"
     )
 
