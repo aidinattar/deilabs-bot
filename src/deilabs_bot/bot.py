@@ -29,7 +29,6 @@ from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
-from .auth_server import LOGIN_TOKENS
 
 UPLOADS_DIR = Path("uploads")
 AUTH_DIR = Path("auth")

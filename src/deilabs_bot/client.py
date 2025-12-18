@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright, Page
 from .config import DeilabsConfig, DEILABS_URL, LAB_IN_OUT_URL
 from .selectors import LAB_SELECTORS, ENTER_BUTTON_SELECTORS, EXIT_BUTTON_SELECTORS
 from .logger import Logger
-from playwright.sync_api import sync_playwright, TimeoutError
+# from playwright.sync_api import sync_playwright, TimeoutError
 
 
 class DeilabsClient:
