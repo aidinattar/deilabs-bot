@@ -141,7 +141,7 @@ deilabs-bot/
 ## Requirements
 
 - Python 3.10+
-- Playwright:
+- Playwright (skip if you use the Docker image):
 
   ```bash
   pip install playwright
@@ -163,6 +163,34 @@ From inside the `src/` folder:
 ```bash
 python -m deilabs_bot.bot
 ```
+
+---
+
+## Docker
+
+To build a portable image that already includes the system dependencies and Playwright browsers:
+
+```bash
+docker build -t deilabs-bot .
+```
+
+Prepare persistent folders (sessions, logs, uploads, preferences) and launch the container:
+
+```bash
+mkdir -p auth logs uploads
+touch user_prefs.json
+
+docker run --rm -it \
+  -e TELEGRAM_BOT_TOKEN="YOUR_TOKEN" \
+  -e BOT_TIMEZONE="Europe/Rome" \
+  -v "$(pwd)/auth:/app/auth" \
+  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/uploads:/app/uploads" \
+  -v "$(pwd)/user_prefs.json:/app/user_prefs.json" \
+  deilabs-bot
+```
+
+Mounting these volumes ensures session files and logs persist across restarts. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) to run in a different zone.
 
 ---
 
