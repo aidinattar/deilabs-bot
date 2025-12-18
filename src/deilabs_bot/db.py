@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 
 DB_PATH = Path("logs") / "deilabs.sqlite3"
+_INITIALIZED = False
 
 
 def _ensure_parent() -> None:
@@ -19,7 +20,11 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def init_db() -> None:
+def init_db(force: bool = False) -> None:
+    global _INITIALIZED
+    if _INITIALIZED and not force:
+        return
+
     with closing(_connect()) as conn:
         conn.executescript(
             """
@@ -54,6 +59,7 @@ def init_db() -> None:
             """
         )
         conn.commit()
+    _INITIALIZED = True
 
 
 def log_session_upload(
@@ -62,6 +68,7 @@ def log_session_upload(
     source_path: str,
     stored_path: str,
 ) -> None:
+    init_db()
     with closing(_connect()) as conn:
         conn.execute(
             """
@@ -81,6 +88,7 @@ def log_status_event(
     status_text: str,
     success: Optional[bool] = None,
 ) -> None:
+    init_db()
     with closing(_connect()) as conn:
         conn.execute(
             """
@@ -99,6 +107,7 @@ def update_current_status(
     lab_name: Optional[str],
     last_entered_at: Optional[str],
 ) -> None:
+    init_db()
     with closing(_connect()) as conn:
         conn.execute(
             """
@@ -117,6 +126,7 @@ def update_current_status(
 
 
 def list_current_status_users() -> List[Tuple[str, Optional[str]]]:
+    init_db()
     with closing(_connect()) as conn:
         rows = conn.execute(
             "SELECT user_id, username FROM current_status"
@@ -125,6 +135,7 @@ def list_current_status_users() -> List[Tuple[str, Optional[str]]]:
 
 
 def reset_all_statuses(status: str = "outside") -> None:
+    init_db()
     with closing(_connect()) as conn:
         conn.execute(
             """
@@ -134,3 +145,8 @@ def reset_all_statuses(status: str = "outside") -> None:
             (status,),
         )
         conn.commit()
+
+
+if __name__ == "__main__":
+    init_db(force=True)
+    print(f"Database ready at {DB_PATH}")
