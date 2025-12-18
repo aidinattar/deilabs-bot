@@ -208,5 +208,6 @@ screenshots/
 logs/
 auth/
 user_prefs.json
+uploads/
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,jupyternotebooks,python
