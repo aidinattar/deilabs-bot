@@ -3,10 +3,11 @@ import re
 import json
 import shutil
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 from functools import partial
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from telegram import (
     Update,
@@ -28,6 +29,14 @@ from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
+from .db import (
+    init_db,
+    log_session_upload,
+    log_status_event,
+    update_current_status,
+    list_current_status_users,
+    reset_all_statuses,
+)
 
 UPLOADS_DIR = Path("uploads")
 AUTH_DIR = Path("auth")
@@ -35,6 +44,9 @@ SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PREFS_FILE = "user_prefs.json"
+BOT_TIMEZONE = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Rome"))
+
+init_db()
 
 # ---------------------------------------------------------------------
 # Preferences helpers
@@ -72,6 +84,19 @@ def resolve_lab(user_id: str, override: Optional[str] = None) -> str:
     if saved:
         return saved
     return "DEI/A | 230 DEI/A"
+
+
+def get_known_users() -> Dict[str, Optional[str]]:
+    """Return mapping of user_id -> last known username."""
+    known: Dict[str, Optional[str]] = {}
+    for uid, username in list_current_status_users():
+        known[uid] = username
+
+    prefs = load_prefs()
+    for uid in prefs.keys():
+        known.setdefault(uid, None)
+
+    return known
 
 
 def _timestamp() -> str:
@@ -113,6 +138,80 @@ def _validate_session_file(path: Path) -> Tuple[bool, str]:
         )
 
     return True, ""
+
+
+def _infer_success(status_text: str) -> Optional[bool]:
+    """Best-effort inference of successful Telegram commands."""
+    lowered = status_text.lower()
+    failure_markers = ["session expired", "could not", "error", "uncertain"]
+    if any(marker in lowered for marker in failure_markers):
+        return False
+
+    success_markers = [
+        "presence logged successfully",
+        "you are already inside",
+        "you are not in any lab",
+        "you have exited the lab",
+    ]
+    if any(marker in lowered for marker in success_markers):
+        return True
+
+    return None
+
+
+def _derive_current_state(
+    lab_name: str,
+    command: str,
+    status_text: str,
+) -> Optional[Tuple[str, Optional[str], Optional[str]]]:
+    """Map textual responses to a structured user state."""
+    lowered = status_text.lower()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if "presence logged successfully" in lowered or "you are already inside" in lowered:
+        return ("inside", lab_name, now_iso)
+
+    if "you are not in any lab" in lowered or "you have exited the lab" in lowered:
+        return ("outside", None, None)
+
+    if "session expired" in lowered or "laboratories are currently closed" in lowered:
+        return ("unknown", None, None)
+
+    if any(marker in lowered for marker in ["could not", "error", "invalid"]):
+        return ("unknown", None, None)
+
+    return None
+
+
+async def _auto_status_update(uid: str, username: Optional[str]) -> None:
+    lab = resolve_lab(uid)
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            partial(run_status, uid, lab),
+        )
+    except Exception as exc:
+        result = f"Automatic status check failed: {exc}"
+
+    log_status_event(
+        user_id=uid,
+        username=username,
+        lab_name=lab,
+        command="auto_status",
+        status_text=result,
+        success=_infer_success(result),
+    )
+    derived = _derive_current_state(lab, "auto_status", result)
+    if derived:
+        status_name, derived_lab, entered_at = derived
+        update_current_status(
+            user_id=uid,
+            username=username,
+            status=status_name,
+            lab_name=(derived_lab or ""),
+            last_entered_at=entered_at,
+        )
 
 
 def build_lab_keyboard(page: int = 0) -> InlineKeyboardMarkup:
@@ -285,6 +384,25 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partial(run_status, uid, lab),
     )
 
+    log_status_event(
+        user_id=uid,
+        username=user.username,
+        lab_name=lab,
+        command="status",
+        status_text=result,
+        success=_infer_success(result),
+    )
+    derived = _derive_current_state(lab, "status", result)
+    if derived:
+        status_name, derived_lab, entered_at = derived
+        update_current_status(
+            user_id=uid,
+            username=user.username,
+            status=status_name,
+            lab_name=(derived_lab or ""),
+            last_entered_at=entered_at,
+        )
+
     await update.message.reply_text(result)
 
 
@@ -301,6 +419,25 @@ async def punch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partial(run_ensure_presence, uid, lab),
     )
 
+    log_status_event(
+        user_id=uid,
+        username=user.username,
+        lab_name=lab,
+        command="punch",
+        status_text=result,
+        success=_infer_success(result),
+    )
+    derived = _derive_current_state(lab, "punch", result)
+    if derived:
+        status_name, derived_lab, entered_at = derived
+        update_current_status(
+            user_id=uid,
+            username=user.username,
+            status=status_name,
+            lab_name=(derived_lab or ""),
+            last_entered_at=entered_at,
+        )
+
     await update.message.reply_text(result)
 
 
@@ -316,6 +453,25 @@ async def exit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         None,
         partial(run_exit, uid, lab),
     )
+
+    log_status_event(
+        user_id=uid,
+        username=user.username,
+        lab_name=lab,
+        command="exit",
+        status_text=result,
+        success=_infer_success(result),
+    )
+    derived = _derive_current_state(lab, "exit", result)
+    if derived:
+        status_name, derived_lab, entered_at = derived
+        update_current_status(
+            user_id=uid,
+            username=user.username,
+            status=status_name,
+            lab_name=(derived_lab or ""),
+            last_entered_at=entered_at,
+        )
 
     await update.message.reply_text(result)
 
@@ -372,9 +528,60 @@ async def upload_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if final_path.exists():
         shutil.copyfile(final_path, backup_path)
     shutil.copyfile(audit_path, final_path)
+    log_session_upload(
+        user_id=uid,
+        username=user.username,
+        source_path=str(audit_path),
+        stored_path=str(final_path),
+    )
 
     await update.message.reply_text(
         "Session updated successfully. You can now run /punch, /status, or /exit.")
+
+
+async def midnight_reset_job(context: ContextTypes.DEFAULT_TYPE):
+    reset_all_statuses()
+    Logger.log("scheduler_midnight_reset", "All statuses reset to outside.", user_id=None)
+
+
+async def morning_ping_job(context: ContextTypes.DEFAULT_TYPE):
+    users = get_known_users()
+    if not users:
+        return
+
+    keyboard = ReplyKeyboardMarkup(
+        [["/punch", "/status"], ["/login", "/setlab"]],
+        resize_keyboard=True,
+    )
+    text = (
+        "Good morning! Are you already in the lab?\n\n"
+        "Remember to run /punch when you enter. Need to refresh your session or choose another lab? "
+        "Use the buttons below."
+    )
+
+    for uid in users.keys():
+        try:
+            chat_id = int(uid)
+        except ValueError:
+            continue
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        except Exception as exc:
+            Logger.log(
+                "scheduler_morning_ping_error",
+                f"Could not send reminder to {uid}: {exc}",
+                level="ERROR",
+                user_id=uid,
+            )
+
+
+async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):
+    users = get_known_users()
+    if not users:
+        return
+
+    for uid, username in users.items():
+        await _auto_status_update(uid, username)
 
 
 def main():
@@ -395,6 +602,18 @@ def main():
     application.add_handler(CallbackQueryHandler(setlab_page_button, pattern=r"^setlab_page:\d+$"))
 
     Logger.log("bot_start", "Telegram bot started.", user_id=None)
+    job_queue = application.job_queue
+    if job_queue is None:
+        Logger.log(
+            "job_queue_missing",
+            "Job queue not available. Install python-telegram-bot[job-queue] to enable scheduled tasks.",
+            level="WARNING",
+            user_id=None,
+        )
+    else:
+        job_queue.run_daily(midnight_reset_job, time=time(hour=0, minute=0, tzinfo=BOT_TIMEZONE))
+        job_queue.run_daily(morning_ping_job, time=time(hour=10, minute=0, tzinfo=BOT_TIMEZONE))
+        job_queue.run_daily(midday_status_job, time=time(hour=13, minute=0, tzinfo=BOT_TIMEZONE))
     application.run_polling()
 
 
