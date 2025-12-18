@@ -1,9 +1,13 @@
-#!/usr/bin/env python3
 import os
+import re
+import uuid 
 import json
+import shutil
 import asyncio
+from datetime import datetime, timezone
 from functools import partial
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+from pathlib import Path
 
 from telegram import (
     Update,
@@ -17,14 +21,22 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
+from .auth_server import LOGIN_TOKENS
 
+UPLOADS_DIR = Path("uploads")
+AUTH_DIR = Path("auth")
+SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
+# TODO: change this to web server URL in production
+WEB_AUTH_URL = os.getenv("WEB_AUTH_URL", "http://localhost:5000")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PREFS_FILE = "user_prefs.json"
 
@@ -64,6 +76,48 @@ def resolve_lab(user_id: str, override: Optional[str] = None) -> str:
     if saved:
         return saved
     return "DEI/A | 230 DEI/A"
+
+
+def _timestamp() -> str:
+    """UTC timestamp for audit file naming."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _validate_session_file(path: Path) -> Tuple[bool, str]:
+    """Lightweight validation to avoid storing malformed Playwright sessions."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        return False, "The uploaded file is not valid JSON. Run `deilabs login` again and resend it."
+    except OSError:
+        return False, "Could not read the uploaded file. Please try again."
+
+    if not isinstance(data, dict):
+        return False, "The session file must contain a JSON object."
+
+    cookies = data.get("cookies")
+    if not isinstance(cookies, list) or not cookies:
+        return (
+            False,
+            "No cookies were found. Run `deilabs login` again and resend the new file.",
+        )
+
+    has_dei_cookie = any(
+        isinstance(cookie, dict)
+        and "domain" in cookie
+        and "dei.unipd.it" in str(cookie.get("domain", "")).lower()
+        for cookie in cookies
+    )
+
+    if not has_dei_cookie:
+        return (
+            False,
+            "The file does not look like a DeiLabs session (cookies missing). Upload the correct file.",
+        )
+
+    return True, ""
+
 
 def build_lab_keyboard(page: int = 0) -> InlineKeyboardMarkup:
     """Build a paginated inline keyboard for selecting a lab."""
@@ -131,6 +185,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "on the DeiLabs website (Labs in/out → Preferred labs page).\n\n"
         "Then, you must connect your UniPD session once from a machine with a GUI:\n\n"
         f"`deilabs login --user-id {uid}`\n\n"
+        "Once the session file `auth_{uid}.json` is created, just send it here as a *document* "
+        "to upload it (or use /login if you have the hosted web flow).\n\n"
         "After that, you can use the buttons or commands:\n"
         "• `/setlab` – set your default lab\n"
         "• `/status` – check your current status\n"
@@ -147,6 +203,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_markdown(msg, reply_markup=keyboard)
+
+
+async def login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a token, associate it with the user, and send an external link for interactive login."""
+    user = update.effective_user
+    uid = str(user.id)
+    
+    if not WEB_AUTH_URL or "localhost" in WEB_AUTH_URL:
+        await update.message.reply_text(
+            "Configuration Error: The web login URL is not set correctly. "
+            "Please set the WEB_AUTH_URL environment variable to your public address."
+        )
+        return
+
+    token = str(uuid.uuid4())
+    
+    # Note: the token will be removed after the first use (or timeout) by the web server.
+    LOGIN_TOKENS[token] = uid 
+    
+    auth_url = f"{WEB_AUTH_URL}/auth?token={token}"
+
+    Logger.log("login_link_generated", f"Generated auth link for user {uid}", url=auth_url)
+
+    keyboard = [
+        [InlineKeyboardButton("🔗 Go to UniPD Login Page", url=auth_url)],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Click the button to start the interactive login flow.\n"
+        "You will be redirected to the **official login page** of the University of Padova. "
+        "After completing the login, your session will be securely saved.",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
 
 async def login_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,6 +358,63 @@ async def exit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 
+# ---------------------------------------------------------------------
+# Session upload helpers
+# ---------------------------------------------------------------------
+def _safe_filename(name: str) -> str:
+    name = (name or "").strip().replace(" ", "_")
+    name = SAFE_NAME_RE.sub("_", name)
+    return name[:180] if len(name) > 180 else name
+
+async def upload_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not update.message:
+        return
+
+    doc = update.message.document
+    if doc is None:
+        await update.message.reply_text("Send the file as a document.")
+        return
+
+    # Optional: limit size (e.g. 10MB)
+    if doc.file_size and doc.file_size > 10 * 1024 * 1024:
+        await update.message.reply_text("File too large (max 10MB).")
+        return
+
+    uid = str(user.id)
+    user_dir = UPLOADS_DIR / uid
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    AUTH_DIR.mkdir(parents=True, exist_ok=True)
+
+    original = _safe_filename(doc.file_name or f"file_{doc.file_unique_id}.json")
+    audit_name = f"{_timestamp()}__{doc.file_unique_id}__{original}"
+    audit_path = user_dir / audit_name
+
+    tg_file = await context.bot.get_file(doc.file_id)
+    await tg_file.download_to_drive(custom_path=str(audit_path))
+
+    is_valid, err = _validate_session_file(audit_path)
+    if not is_valid:
+        try:
+            if audit_path.exists():
+                audit_path.unlink()
+        except OSError:
+            pass
+        await update.message.reply_text(err)
+        return
+
+    final_name = f"auth_{uid}.json"
+    final_path = AUTH_DIR / final_name
+    backup_path = final_path.with_suffix(".bak")
+    if final_path.exists():
+        shutil.copyfile(final_path, backup_path)
+    shutil.copyfile(audit_path, final_path)
+
+    await update.message.reply_text(
+        "Session updated successfully. You can now run /punch, /status, or /exit.")
+
+
 def main():
     if not BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set.")
@@ -274,11 +422,13 @@ def main():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("login", login_info))
+    # application.add_handler(CommandHandler("login", login_info))
+    application.add_handler(CommandHandler("login", login_cmd))
     application.add_handler(CommandHandler("setlab", setlab_cmd))
     application.add_handler(CommandHandler("status", status_cmd))
     application.add_handler(CommandHandler("punch", punch_cmd))
     application.add_handler(CommandHandler("exit", exit_cmd))
+    application.add_handler(MessageHandler(filters.Document.ALL, upload_document))
 
     application.add_handler(CallbackQueryHandler(setlab_button, pattern=r"^setlab:\d+$"))
     application.add_handler(CallbackQueryHandler(setlab_page_button, pattern=r"^setlab_page:\d+$"))
