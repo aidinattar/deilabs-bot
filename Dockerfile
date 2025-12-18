@@ -17,6 +17,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+RUN pip install --no-cache-dir .
 
 ENV TELEGRAM_BOT_TOKEN="" \
     BOT_TIMEZONE="Europe/Rome"
