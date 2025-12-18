@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright, Page
 from .config import DeilabsConfig, DEILABS_URL, LAB_IN_OUT_URL
 from .selectors import LAB_SELECTORS, ENTER_BUTTON_SELECTORS, EXIT_BUTTON_SELECTORS
 from .logger import Logger
+from playwright.sync_api import sync_playwright, TimeoutError
 
 
 class DeilabsClient:
@@ -109,7 +110,7 @@ class DeilabsClient:
 
         NOTE: must be run from a graphical session (or via ssh -X / ssh -Y).
         """
-        # piccolo check amichevole sul DISPLAY
+        # Friendly sanity check on DISPLAY availability
         if not os.environ.get("DISPLAY"):
             Logger.log(
                 "interactive_login_error",
@@ -264,9 +265,9 @@ class DeilabsClient:
         """
         Leave the lab if currently inside.
 
-        - Se sessione scaduta -> lo segnala
-        - Se non sei dentro -> messaggio coerente (anche se i lab sono chiusi)
-        - Se sei dentro -> clicca 'Exit from lab' e verifica.
+        - If the session is expired -> report it
+        - If already outside -> return a coherent message (even when labs are closed)
+        - If inside -> click 'Exit from lab' and verify the result
         """
         Logger.log(
             "leave_start",
@@ -302,7 +303,7 @@ class DeilabsClient:
                 return msg
 
             if not self._is_inside_lab(page):
-                # Non sei dentro: distinguiamo lab chiusi o no
+                # Not inside: differentiate closed labs vs open labs
                 if self._are_labs_closed(page):
                     msg = "You are not in any lab and laboratories are currently closed."
                 else:
@@ -348,7 +349,7 @@ class DeilabsClient:
 
             page.wait_for_timeout(2000)
 
-            # Ricontrollo stato
+            # Double-check status
             if self._is_inside_lab(page):
                 self.save_state(page, "exit_uncertain")
                 msg = "Tried to leave lab, but status is uncertain (still appears inside)."
@@ -372,7 +373,7 @@ class DeilabsClient:
         """
         Check current status without changing anything.
 
-        Possibili risultati:
+        Possible outcomes:
         - "Session expired ..."
         - "Laboratories are currently closed ..."
         - "You are already inside the lab."
