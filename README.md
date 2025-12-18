@@ -47,6 +47,16 @@ Session files are stored in:
 auth/auth_<user_id>.json
 ```
 
+- Session uploads and command outcomes are logged to `logs/deilabs.sqlite3`
+- `session_uploads` tracks who uploaded which session file
+- `status_events` stores `/status`, `/punch`, and `/exit` results for future reporting
+- `current_status` keeps the latest known state (inside/outside/unknown), current lab, and entry time per user
+- Scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) require installing the Telegram job queue extra:
+
+```bash
+pip install "python-telegram-bot[job-queue]"
+```
+
 ---
 
 ## Telegram Bot
