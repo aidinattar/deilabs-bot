@@ -61,16 +61,18 @@ The Telegram bot provides:
 - **`/exit`** – Marks exit from the laboratory.  
 - **`/setlab`** – Sets the user’s default lab.  
   If used with no arguments, it presents a keyboard with multiple laboratory options.
+- **Document upload** – Send the `auth_<user_id>.json` file as a *document* in the chat to update your session without touching the server filesystem.
 
 ### Notes
 
 - The bot can only operate *after* a valid session has been created with:
 
-  ```bash
-  deilabs login --user-id <ID>
-  ```
+```bash
+deilabs login --user-id <ID>
+```
 
 - The bot uses the same session file as the CLI.
+- When the session file is updated locally, forward it to the bot chat (as a document) to refresh the copy stored under `auth/auth_<user_id>.json`.
 
 ---
 
