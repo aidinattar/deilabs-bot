@@ -14,6 +14,19 @@ class DeilabsClient:
         self.config = config
 
     # ---------- Helpers ----------
+    def _session_expired_message(self) -> str:
+        return (
+            "Session expired: please login again with "
+            f"`deilabs login --user-id {self.config.user_id}`.\n"
+            f"If you use the Telegram bot, upload the refreshed `auth_{self.config.user_id}.json` file."
+        )
+
+    def _is_session_expired(self, page: Page) -> bool:
+        url = (page.url or "").lower()
+        if "login" in url or "shibboleth" in url:
+            return True
+        html = page.content().lower()
+        return ("session expired" in html) or ("session seems to have expired" in html)
 
     def _is_inside_lab(self, page: Page) -> bool:
         """Return True if the page indicates that the user is already inside the lab."""
@@ -191,12 +204,9 @@ class DeilabsClient:
             if self.config.debug:
                 self.save_state(page, "before")
 
-            # If redirected to login, session is expired
-            if "login" in page.url or "shibboleth" in page.url:
-                msg = (
-                    "Session expired: please run the interactive login again "
-                    f"for user_id={self.config.user_id}."
-                )
+            # If redirected to login or explicit session-expired page, session is expired
+            if self._is_session_expired(page):
+                msg = self._session_expired_message()
                 Logger.log(
                     "session_expired",
                     msg,
@@ -286,11 +296,8 @@ class DeilabsClient:
             page.goto(LAB_IN_OUT_URL)
             page.wait_for_timeout(2000)
 
-            if "login" in page.url or "shibboleth" in page.url:
-                msg = (
-                    "Session expired: please run the interactive login again "
-                    f"for user_id={self.config.user_id}."
-                )
+            if self._is_session_expired(page):
+                msg = self._session_expired_message()
                 Logger.log(
                     "leave_session_expired",
                     msg,
@@ -396,11 +403,8 @@ class DeilabsClient:
             page.goto(LAB_IN_OUT_URL)
             page.wait_for_timeout(2000)
 
-            if "login" in page.url or "shibboleth" in page.url:
-                msg = (
-                    "Session expired: please run the interactive login again "
-                    f"for user_id={self.config.user_id}."
-                )
+            if self._is_session_expired(page):
+                msg = self._session_expired_message()
                 Logger.log(
                     "status_session_expired",
                     msg,
