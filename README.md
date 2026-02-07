@@ -72,6 +72,7 @@ The Telegram bot provides:
 - **`/setlab`** – Sets the user’s default lab.  
   If used with no arguments, it presents a keyboard with multiple laboratory options.
 - **Document upload** – Send the `auth_<user_id>.json` file as a *document* in the chat to update your session without touching the server filesystem.
+- **`/admin`** – Admin-only panel to manually trigger reminder, global status check, reset, and current-status table view (with filters and pagination).
 
 ### Notes
 
@@ -154,6 +155,12 @@ deilabs-bot/
   export TELEGRAM_BOT_TOKEN="..."
   ```
 
+- Optional admin IDs in env (comma separated):
+
+  ```bash
+  export ADMIN_USER_IDS="123456789,987654321"
+  ```
+
 ---
 
 ## Running the Bot
@@ -202,4 +209,26 @@ The system supports:
 - Enter/exit operations via CLI and Telegram.
 - Status checking.
 - Lab selection via command or Telegram inline keyboards.
+- Session upload via Telegram document (`auth_<user_id>.json`).
+- SQLite logging (`session_uploads`, `status_events`, `current_status`).
+- Scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status).
 - Consistent session handling per user.
+
+---
+
+## Testing
+
+Run the test suite without real DeiLabs login (Playwright/browser interactions are mocked in tests):
+
+```bash
+pip install -e ".[dev]"
+pytest -q tests
+```
+
+Useful subsets:
+
+```bash
+pytest -q tests/test_db.py
+pytest -q tests/test_bot_helpers.py
+pytest -q tests/test_bot_async.py
+```
