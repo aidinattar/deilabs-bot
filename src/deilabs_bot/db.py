@@ -134,10 +134,33 @@ def list_current_status_users() -> List[Tuple[str, Optional[str]]]:
     return [(row["user_id"], row["username"]) for row in rows]
 
 
-def reset_all_statuses(status: str = "outside") -> None:
+def list_current_status_snapshot() -> List[Tuple[str, Optional[str], str, Optional[str], Optional[str], str]]:
     init_db()
     with closing(_connect()) as conn:
-        conn.execute(
+        rows = conn.execute(
+            """
+            SELECT user_id, username, status, lab_name, last_entered_at, updated_at
+            FROM current_status
+            ORDER BY user_id ASC
+            """
+        ).fetchall()
+    return [
+        (
+            row["user_id"],
+            row["username"],
+            row["status"],
+            row["lab_name"],
+            row["last_entered_at"],
+            row["updated_at"],
+        )
+        for row in rows
+    ]
+
+
+def reset_all_statuses(status: str = "outside") -> int:
+    init_db()
+    with closing(_connect()) as conn:
+        cursor = conn.execute(
             """
             UPDATE current_status
             SET status = ?, lab_name = NULL, last_entered_at = NULL, updated_at = datetime('now')
@@ -145,6 +168,7 @@ def reset_all_statuses(status: str = "outside") -> None:
             (status,),
         )
         conn.commit()
+    return cursor.rowcount
 
 
 if __name__ == "__main__":
