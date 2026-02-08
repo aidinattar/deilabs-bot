@@ -57,6 +57,8 @@ auth/auth_<user_id>.json
 pip install "python-telegram-bot[job-queue]"
 ```
 
+- Browser reuse (enabled by default): `DEILABS_REUSE_BROWSER=1` keeps a headless Firefox runtime warm to reduce latency while still using isolated contexts per user/session.
+
 ---
 
 ## Telegram Bot
@@ -190,6 +192,7 @@ touch user_prefs.json
 docker run --rm -it \
   -e TELEGRAM_BOT_TOKEN="YOUR_TOKEN" \
   -e BOT_TIMEZONE="Europe/Rome" \
+  -e ADMIN_USER_IDS="123456789" \
   -v "$(pwd)/auth:/app/auth" \
   -v "$(pwd)/logs:/app/logs" \
   -v "$(pwd)/uploads:/app/uploads" \
@@ -198,6 +201,27 @@ docker run --rm -it \
 ```
 
 Mounting these volumes ensures session files and logs persist across restarts. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) to run in a different zone.
+
+Alternatively, you can use Docker Compose:
+
+```bash
+cp .env.example .env
+# edit .env and set TELEGRAM_BOT_TOKEN (and optional ADMIN_USER_IDS/BOT_TIMEZONE)
+
+mkdir -p auth logs uploads
+touch user_prefs.json
+
+docker compose up --build
+```
+
+### Docker Troubleshooting
+
+- `pull access denied for deilab-bot`: check image name typo and use `deilabs-bot` (with `s`) after `docker build -t deilabs-bot .`.
+- `No module named deilabs_bot`: rebuild the image after Dockerfile updates:
+
+  ```bash
+  docker build --no-cache -t deilabs-bot .
+  ```
 
 ---
 
