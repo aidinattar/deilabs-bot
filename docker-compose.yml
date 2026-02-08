@@ -1,0 +1,14 @@
+services:
+  deilabs-bot:
+    build: .
+    container_name: deilabs-bot
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BOT_TIMEZONE: ${BOT_TIMEZONE:-Europe/Rome}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
+    volumes:
+      - ./auth:/app/auth
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./user_prefs.json:/app/user_prefs.json
