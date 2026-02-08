@@ -5,7 +5,7 @@ import shutil
 import asyncio
 from datetime import datetime, timezone, time
 from functools import partial
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -29,6 +29,7 @@ from .config import DeilabsConfig
 from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
+from .prefs import load_prefs, get_lab_for_user, set_lab_for_user, resolve_lab
 from .db import (
     init_db,
     log_session_upload,
@@ -44,7 +45,6 @@ AUTH_DIR = Path("auth")
 SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PREFS_FILE = "user_prefs.json"
 BOT_TIMEZONE = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Rome"))
 ADMIN_USER_IDS = {
     uid.strip() for uid in os.getenv("ADMIN_USER_IDS", "").split(",") if uid.strip()
@@ -56,43 +56,6 @@ except ValueError:
     STATUS_PAGE_SIZE = 10
 
 init_db()
-
-# ---------------------------------------------------------------------
-# Preferences helpers
-# ---------------------------------------------------------------------
-def load_prefs() -> Dict[str, Any]:
-    if not os.path.exists(PREFS_FILE):
-        return {}
-    with open(PREFS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_prefs(prefs: Dict[str, Any]) -> None:
-    with open(PREFS_FILE, "w", encoding="utf-8") as f:
-        json.dump(prefs, f, indent=2)
-
-
-def get_lab_for_user(user_id: str) -> Optional[str]:
-    prefs = load_prefs()
-    user = prefs.get(str(user_id))
-    if not user:
-        return None
-    return user.get("lab_name")
-
-
-def set_lab_for_user(user_id: str, lab_name: str) -> None:
-    prefs = load_prefs()
-    prefs[str(user_id)] = {"lab_name": lab_name}
-    save_prefs(prefs)
-
-
-def resolve_lab(user_id: str, override: Optional[str] = None) -> str:
-    if override:
-        return override
-    saved = get_lab_for_user(user_id)
-    if saved:
-        return saved
-    return "DEI/A | 230 DEI/A"
 
 
 def get_known_users() -> Dict[str, Optional[str]]:

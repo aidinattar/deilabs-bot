@@ -1,45 +1,6 @@
 import argparse
-import json
-import os
 from deilabs_bot import DeilabsConfig, DeilabsClient
-
-PREFS_FILE = "user_prefs.json"
-
-
-def load_prefs():
-    if not os.path.exists(PREFS_FILE):
-        return {}
-    with open(PREFS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_prefs(prefs):
-    with open(PREFS_FILE, "w", encoding="utf-8") as f:
-        json.dump(prefs, f, indent=2)
-
-
-def get_lab_for_user(user_id: str) -> str | None:
-    prefs = load_prefs()
-    user = prefs.get(str(user_id))
-    if not user:
-        return None
-    return user.get("lab_name")
-
-
-def set_lab_for_user(user_id: str, lab_name: str) -> None:
-    prefs = load_prefs()
-    prefs[str(user_id)] = {"lab_name": lab_name}
-    save_prefs(prefs)
-
-
-def resolve_lab(user_id: str, lab_arg: str | None) -> str:
-    if lab_arg:
-        return lab_arg
-    saved = get_lab_for_user(user_id)
-    if saved:
-        return saved
-    # default fallback
-    return "DEI/A | 230 DEI/A"
+from deilabs_bot.prefs import resolve_lab, set_lab_for_user
 
 
 def parse_args():
