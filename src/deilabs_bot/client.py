@@ -1,5 +1,9 @@
 import os
+import atexit
+import threading
 from datetime import datetime
+from time import monotonic
+from contextlib import contextmanager
 
 from playwright.sync_api import sync_playwright, Page
 
@@ -10,8 +14,18 @@ from .logger import Logger
 
 
 class DeilabsClient:
+    _thread_local = threading.local()
+    _runtime_lock = threading.Lock()
+    _runtimes = []
+    _atexit_registered = False
+
     def __init__(self, config: DeilabsConfig):
         self.config = config
+        self.page_wait_timeout_ms = int(os.getenv("DEILABS_PAGE_WAIT_TIMEOUT_MS", "8000"))
+        self.action_wait_timeout_ms = int(os.getenv("DEILABS_ACTION_WAIT_TIMEOUT_MS", "8000"))
+        self.poll_interval_ms = int(os.getenv("DEILABS_POLL_INTERVAL_MS", "250"))
+        self.selector_timeout_ms = int(os.getenv("DEILABS_SELECTOR_TIMEOUT_MS", "1200"))
+        self.reuse_browser = os.getenv("DEILABS_REUSE_BROWSER", "1").lower() not in {"0", "false", "no"}
 
     # ---------- Helpers ----------
     def _session_expired_message(self) -> str:
@@ -32,6 +46,107 @@ class DeilabsClient:
         """Return True if the page indicates that the user is already inside the lab."""
         html = page.content()
         return ("You have entered the lab" in html) or ("Exit from lab" in html)
+
+    @classmethod
+    def _register_atexit(cls) -> None:
+        if cls._atexit_registered:
+            return
+        with cls._runtime_lock:
+            if cls._atexit_registered:
+                return
+            atexit.register(cls.shutdown_shared_browsers)
+            cls._atexit_registered = True
+
+    @classmethod
+    def shutdown_shared_browsers(cls) -> None:
+        with cls._runtime_lock:
+            runtimes = list(cls._runtimes)
+            cls._runtimes.clear()
+
+        for runtime in runtimes:
+            browser = runtime.get("browser")
+            playwright = runtime.get("playwright")
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
+            try:
+                if playwright is not None:
+                    playwright.stop()
+            except Exception:
+                pass
+
+    def _get_thread_runtime(self):
+        runtime = getattr(self._thread_local, "runtime", None)
+        if runtime is not None:
+            browser = runtime.get("browser")
+            try:
+                if browser is not None and browser.is_connected():
+                    return runtime
+            except Exception:
+                pass
+
+        self._register_atexit()
+        playwright = sync_playwright().start()
+        browser = playwright.firefox.launch(headless=True)
+        runtime = {"playwright": playwright, "browser": browser}
+        self._thread_local.runtime = runtime
+        with self._runtime_lock:
+            self._runtimes.append(runtime)
+        return runtime
+
+    @contextmanager
+    def _session_page(self):
+        if self.reuse_browser:
+            runtime = self._get_thread_runtime()
+            context = runtime["browser"].new_context(storage_state=self.config.storage_state_path)
+            page = context.new_page()
+            try:
+                yield page
+            finally:
+                context.close()
+            return
+
+        with sync_playwright() as p:
+            browser = p.firefox.launch(headless=True)
+            context = browser.new_context(storage_state=self.config.storage_state_path)
+            page = context.new_page()
+            try:
+                yield page
+            finally:
+                browser.close()
+
+    def _wait_until(self, page: Page, predicate, timeout_ms: int) -> bool:
+        """Poll a predicate until it becomes true or timeout expires."""
+        deadline = monotonic() + (timeout_ms / 1000.0)
+        while monotonic() < deadline:
+            try:
+                if predicate():
+                    return True
+            except Exception:
+                pass
+            page.wait_for_timeout(self.poll_interval_ms)
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+
+    def _wait_for_page_ready(self, page: Page) -> None:
+        """Wait for a stable state after opening the in/out page."""
+        def ready() -> bool:
+            if self._is_session_expired(page):
+                return True
+            if self._are_labs_closed(page):
+                return True
+            if self._is_inside_lab(page):
+                return True
+            for sel in LAB_SELECTORS:
+                if page.query_selector(sel) is not None:
+                    return True
+            return False
+
+        self._wait_until(page, ready, timeout_ms=self.page_wait_timeout_ms)
 
     def save_state(self, page: Page, tag: str) -> None:
         """Save screenshot + HTML for debugging."""
@@ -62,8 +177,9 @@ class DeilabsClient:
         select_found = False
         for sel in LAB_SELECTORS:
             try:
-                page.wait_for_selector(sel, timeout=5000)
-                page.select_option(sel, label=self.config.lab_name)
+                if page.query_selector(sel) is None:
+                    continue
+                page.select_option(sel, label=self.config.lab_name, timeout=self.selector_timeout_ms)
                 Logger.log(
                     "select_lab",
                     f"Selected lab '{self.config.lab_name}' via selector {sel}",
@@ -83,7 +199,7 @@ class DeilabsClient:
         clicked = False
         for btn_sel in ENTER_BUTTON_SELECTORS:
             try:
-                page.click(btn_sel)
+                page.click(btn_sel, timeout=self.selector_timeout_ms, no_wait_after=True)
                 Logger.log(
                     "click_enter",
                     f"Clicked Enter via selector {btn_sel}",
@@ -99,7 +215,11 @@ class DeilabsClient:
             self.save_state(page, "no_enter_button")
             return "Could not click Enter button."
 
-        page.wait_for_timeout(2000)
+        self._wait_until(
+            page,
+            lambda: self._is_inside_lab(page) or self._is_session_expired(page),
+            timeout_ms=self.action_wait_timeout_ms,
+        )
 
         if self._is_inside_lab(page):
             return f"Presence logged successfully for lab: {self.config.lab_name}"
@@ -187,13 +307,9 @@ class DeilabsClient:
             user_id=self.config.user_id,
         )
 
-        with sync_playwright() as p:
-            browser = p.firefox.launch(headless=True)
-            context = browser.new_context(storage_state=self.config.storage_state_path)
-            page = context.new_page()
-
-            page.goto(LAB_IN_OUT_URL)
-            page.wait_for_timeout(2000)
+        with self._session_page() as page:
+            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._wait_for_page_ready(page)
             Logger.log(
                 "page_loaded",
                 "laboratory_in_outs page opened.",
@@ -215,7 +331,6 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=False,
                 )
-                browser.close()
                 return msg
             
             if self._are_labs_closed(page):
@@ -230,7 +345,6 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=False,
                 )
-                browser.close()
                 return msg
 
             if self._is_inside_lab(page):
@@ -262,13 +376,11 @@ class DeilabsClient:
                         success=False,
                     )
                     self.save_state(page, "enter_error")
-                    browser.close()
                     raise
 
             if self.config.debug:
                 self.save_state(page, "after")
 
-            browser.close()
             return msg
         
     def leave_lab(self) -> str:
@@ -286,15 +398,9 @@ class DeilabsClient:
             user_id=self.config.user_id,
         )
 
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.firefox.launch(headless=True)
-            context = browser.new_context(storage_state=self.config.storage_state_path)
-            page = context.new_page()
-
-            page.goto(LAB_IN_OUT_URL)
-            page.wait_for_timeout(2000)
+        with self._session_page() as page:
+            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._wait_for_page_ready(page)
 
             if self._is_session_expired(page):
                 msg = self._session_expired_message()
@@ -306,7 +412,6 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=False,
                 )
-                browser.close()
                 return msg
 
             if not self._is_inside_lab(page):
@@ -322,13 +427,12 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=True,
                 )
-                browser.close()
                 return msg
 
             clicked = False
             for sel in EXIT_BUTTON_SELECTORS:
                 try:
-                    page.click(sel)
+                    page.click(sel, timeout=self.selector_timeout_ms, no_wait_after=True)
                     Logger.log(
                         "click_exit",
                         f"Clicked Exit via selector {sel}",
@@ -351,10 +455,13 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=False,
                 )
-                browser.close()
                 return msg
 
-            page.wait_for_timeout(2000)
+            self._wait_until(
+                page,
+                lambda: (not self._is_inside_lab(page)) or self._is_session_expired(page),
+                timeout_ms=self.action_wait_timeout_ms,
+            )
 
             # Double-check status
             if self._is_inside_lab(page):
@@ -372,7 +479,6 @@ class DeilabsClient:
                 user_id=self.config.user_id,
                 success=success,
             )
-            browser.close()
             return msg
 
 
@@ -393,15 +499,9 @@ class DeilabsClient:
             user_id=self.config.user_id,
         )
 
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.firefox.launch(headless=True)
-            context = browser.new_context(storage_state=self.config.storage_state_path)
-            page = context.new_page()
-
-            page.goto(LAB_IN_OUT_URL)
-            page.wait_for_timeout(2000)
+        with self._session_page() as page:
+            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._wait_for_page_ready(page)
 
             if self._is_session_expired(page):
                 msg = self._session_expired_message()
@@ -413,7 +513,6 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=False,
                 )
-                browser.close()
                 return msg
 
             if self._are_labs_closed(page):
@@ -425,7 +524,6 @@ class DeilabsClient:
                     user_id=self.config.user_id,
                     success=True,
                 )
-                browser.close()
                 return msg
 
             if self._is_inside_lab(page):
@@ -440,5 +538,4 @@ class DeilabsClient:
                 user_id=self.config.user_id,
                 success=True,
             )
-            browser.close()
             return msg
