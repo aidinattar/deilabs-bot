@@ -58,6 +58,7 @@ pip install "python-telegram-bot[job-queue]"
 ```
 
 - Browser reuse (enabled by default): `DEILABS_REUSE_BROWSER=1` keeps a headless Firefox runtime warm to reduce latency while still using isolated contexts per user/session.
+- Navigation retry (for transient network errors): `DEILABS_NAV_RETRIES=2` and `DEILABS_NAV_RETRY_DELAY_MS=700`.
 
 ---
 
