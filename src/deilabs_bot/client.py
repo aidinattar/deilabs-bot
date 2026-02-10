@@ -5,7 +5,12 @@ from datetime import datetime
 from time import monotonic
 from contextlib import contextmanager
 
-from playwright.sync_api import sync_playwright, Page
+from playwright.sync_api import (
+    sync_playwright,
+    Page,
+    Error as PlaywrightError,
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 from .config import DeilabsConfig, DEILABS_URL, LAB_IN_OUT_URL
 from .selectors import LAB_SELECTORS, ENTER_BUTTON_SELECTORS, EXIT_BUTTON_SELECTORS
@@ -25,6 +30,8 @@ class DeilabsClient:
         self.action_wait_timeout_ms = int(os.getenv("DEILABS_ACTION_WAIT_TIMEOUT_MS", "8000"))
         self.poll_interval_ms = int(os.getenv("DEILABS_POLL_INTERVAL_MS", "250"))
         self.selector_timeout_ms = int(os.getenv("DEILABS_SELECTOR_TIMEOUT_MS", "1200"))
+        self.nav_retries = max(0, int(os.getenv("DEILABS_NAV_RETRIES", "2")))
+        self.nav_retry_delay_ms = max(0, int(os.getenv("DEILABS_NAV_RETRY_DELAY_MS", "700")))
         self.reuse_browser = os.getenv("DEILABS_REUSE_BROWSER", "1").lower() not in {"0", "false", "no"}
 
     # ---------- Helpers ----------
@@ -147,6 +154,46 @@ class DeilabsClient:
             return False
 
         self._wait_until(page, ready, timeout_ms=self.page_wait_timeout_ms)
+
+    def _is_retryable_navigation_error(self, exc: Exception) -> bool:
+        if isinstance(exc, PlaywrightTimeoutError):
+            return True
+        msg = str(exc).lower()
+        retry_markers = (
+            "ns_error_net_interrupt",
+            "net::err_",
+            "timed out",
+            "timeout",
+            "temporarily unavailable",
+            "connection reset",
+            "connection aborted",
+            "network changed",
+        )
+        return any(marker in msg for marker in retry_markers)
+
+    def _open_lab_page(self, page: Page) -> None:
+        attempts = self.nav_retries + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                page.goto(
+                    LAB_IN_OUT_URL,
+                    wait_until="domcontentloaded",
+                    timeout=self.page_wait_timeout_ms,
+                )
+                return
+            except (PlaywrightError, PlaywrightTimeoutError) as exc:
+                if self._is_retryable_navigation_error(exc) and attempt < attempts:
+                    Logger.log(
+                        "lab_page_retry",
+                        f"Navigation error ({attempt}/{attempts}): {exc}",
+                        level="WARNING",
+                        url=LAB_IN_OUT_URL,
+                        user_id=self.config.user_id,
+                        success=False,
+                    )
+                    page.wait_for_timeout(self.nav_retry_delay_ms * attempt)
+                    continue
+                raise
 
     def save_state(self, page: Page, tag: str) -> None:
         """Save screenshot + HTML for debugging."""
@@ -308,7 +355,7 @@ class DeilabsClient:
         )
 
         with self._session_page() as page:
-            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._open_lab_page(page)
             self._wait_for_page_ready(page)
             Logger.log(
                 "page_loaded",
@@ -399,7 +446,7 @@ class DeilabsClient:
         )
 
         with self._session_page() as page:
-            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._open_lab_page(page)
             self._wait_for_page_ready(page)
 
             if self._is_session_expired(page):
@@ -500,7 +547,7 @@ class DeilabsClient:
         )
 
         with self._session_page() as page:
-            page.goto(LAB_IN_OUT_URL, wait_until="domcontentloaded")
+            self._open_lab_page(page)
             self._wait_for_page_ready(page)
 
             if self._is_session_expired(page):

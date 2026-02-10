@@ -25,7 +25,7 @@ from telegram.ext import (
     filters,
 )
 
-from .config import DeilabsConfig
+from .config import DeilabsConfig, LAB_IN_OUT_URL
 from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
@@ -319,6 +319,15 @@ def run_exit(user_id: str, lab_name: str) -> str:
     return client.leave_lab()
 
 
+def _transient_client_error_message(uid: str) -> str:
+    return (
+        "Temporary network error while contacting DeiLabs. "
+        "Please retry in a minute.\n"
+        f"If this keeps happening, refresh your session with `deilabs login --user-id {uid}` "
+        "and upload the new file."
+    )
+
+
 # ---------------------------------------------------------------------
 # Bot commands
 # ---------------------------------------------------------------------
@@ -521,10 +530,31 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Checking your current lab status...")
 
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        partial(run_status, uid, lab),
-    )
+    try:
+        result = await loop.run_in_executor(
+            None,
+            partial(run_status, uid, lab),
+        )
+    except Exception as exc:
+        Logger.log(
+            "status_cmd_error",
+            f"Status check failed: {exc}",
+            level="ERROR",
+            user_id=uid,
+            url=LAB_IN_OUT_URL,
+            success=False,
+        )
+        result = _transient_client_error_message(uid)
+        log_status_event(
+            user_id=uid,
+            username=user.username,
+            lab_name=lab,
+            command="status",
+            status_text=result,
+            success=False,
+        )
+        await update.message.reply_text(result)
+        return
 
     log_status_event(
         user_id=uid,
@@ -556,10 +586,31 @@ async def punch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Ensuring presence in lab:\n{lab}\nPlease wait...")
 
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        partial(run_ensure_presence, uid, lab),
-    )
+    try:
+        result = await loop.run_in_executor(
+            None,
+            partial(run_ensure_presence, uid, lab),
+        )
+    except Exception as exc:
+        Logger.log(
+            "punch_cmd_error",
+            f"Presence check failed: {exc}",
+            level="ERROR",
+            user_id=uid,
+            url=LAB_IN_OUT_URL,
+            success=False,
+        )
+        result = _transient_client_error_message(uid)
+        log_status_event(
+            user_id=uid,
+            username=user.username,
+            lab_name=lab,
+            command="punch",
+            status_text=result,
+            success=False,
+        )
+        await update.message.reply_text(result)
+        return
 
     log_status_event(
         user_id=uid,
@@ -591,10 +642,31 @@ async def exit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Trying to leave the lab...")
 
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None,
-        partial(run_exit, uid, lab),
-    )
+    try:
+        result = await loop.run_in_executor(
+            None,
+            partial(run_exit, uid, lab),
+        )
+    except Exception as exc:
+        Logger.log(
+            "exit_cmd_error",
+            f"Exit action failed: {exc}",
+            level="ERROR",
+            user_id=uid,
+            url=LAB_IN_OUT_URL,
+            success=False,
+        )
+        result = _transient_client_error_message(uid)
+        log_status_event(
+            user_id=uid,
+            username=user.username,
+            lab_name=lab,
+            command="exit",
+            status_text=result,
+            success=False,
+        )
+        await update.message.reply_text(result)
+        return
 
     log_status_event(
         user_id=uid,

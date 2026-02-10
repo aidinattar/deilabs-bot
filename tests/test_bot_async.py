@@ -112,6 +112,26 @@ def test_status_cmd_logs_and_updates(monkeypatch):
     assert calls["current"][0]["status"] == "inside"
 
 
+def test_status_cmd_handles_runtime_error(monkeypatch):
+    update, context, msg = _build_update_and_context(user_id=174325172)
+    calls = {"events": []}
+
+    monkeypatch.setattr(bot, "resolve_lab", lambda uid: "LAB-TEST")
+
+    def _raise(_uid, _lab):
+        raise RuntimeError("Page.goto: NS_ERROR_NET_INTERRUPT")
+
+    monkeypatch.setattr(bot, "run_status", _raise)
+    monkeypatch.setattr(bot.asyncio, "get_running_loop", lambda: ImmediateLoop())
+    monkeypatch.setattr(bot, "log_status_event", lambda **kwargs: calls["events"].append(kwargs))
+
+    asyncio.run(bot.status_cmd(update, context))
+
+    assert "Temporary network error" in msg.texts[1]
+    assert calls["events"][0]["command"] == "status"
+    assert calls["events"][0]["success"] is False
+
+
 def test_punch_cmd_logs_and_updates(monkeypatch):
     update, context, msg = _build_update_and_context()
     calls = {"events": [], "current": []}

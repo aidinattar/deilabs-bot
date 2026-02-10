@@ -1,3 +1,4 @@
+import deilabs_bot.client as client_module
 from deilabs_bot.client import DeilabsClient
 from deilabs_bot.config import DeilabsConfig
 
@@ -44,3 +45,69 @@ def test_is_session_expired_false_for_normal_page():
         "<div>You are not in any lab.</div>",
     )
     assert client._is_session_expired(page) is False
+
+
+def test_is_retryable_navigation_error_detects_ns_interrupt():
+    client = _client()
+    err = RuntimeError("Page.goto: NS_ERROR_NET_INTERRUPT")
+    assert client._is_retryable_navigation_error(err) is True
+
+
+def test_open_lab_page_retries_on_transient_error(monkeypatch):
+    client = _client()
+    client.nav_retries = 2
+    client.nav_retry_delay_ms = 10
+
+    class FakePage:
+        def __init__(self):
+            self.calls = 0
+            self.waits = []
+
+        def goto(self, url, wait_until, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("Page.goto: NS_ERROR_NET_INTERRUPT")
+            return None
+
+        def wait_for_timeout(self, value):
+            self.waits.append(value)
+
+    page = FakePage()
+    monkeypatch.setattr(client_module, "PlaywrightError", RuntimeError)
+    monkeypatch.setattr(client_module, "PlaywrightTimeoutError", TimeoutError)
+    monkeypatch.setattr(client_module.Logger, "log", lambda *args, **kwargs: None)
+
+    client._open_lab_page(page)
+
+    assert page.calls == 2
+    assert page.waits == [10]
+
+
+def test_open_lab_page_does_not_retry_non_retryable_error(monkeypatch):
+    client = _client()
+    client.nav_retries = 3
+
+    class FakePage:
+        def __init__(self):
+            self.calls = 0
+
+        def goto(self, url, wait_until, timeout):
+            self.calls += 1
+            raise RuntimeError("Page.goto: Protocol error")
+
+        def wait_for_timeout(self, value):
+            raise AssertionError("No retry delay expected")
+
+    page = FakePage()
+    monkeypatch.setattr(client_module, "PlaywrightError", RuntimeError)
+    monkeypatch.setattr(client_module, "PlaywrightTimeoutError", TimeoutError)
+    monkeypatch.setattr(client_module.Logger, "log", lambda *args, **kwargs: None)
+
+    try:
+        client._open_lab_page(page)
+    except RuntimeError as exc:
+        assert "Protocol error" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError")
+
+    assert page.calls == 1
