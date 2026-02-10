@@ -188,7 +188,7 @@ Prepare persistent folders (sessions, logs, uploads, preferences) and launch the
 
 ```bash
 mkdir -p auth logs uploads
-touch user_prefs.json
+echo '{}' > user_prefs.json
 
 docker run --rm -it \
   -e TELEGRAM_BOT_TOKEN="YOUR_TOKEN" \
@@ -210,7 +210,7 @@ cp .env.example .env
 # edit .env and set TELEGRAM_BOT_TOKEN (and optional ADMIN_USER_IDS/BOT_TIMEZONE)
 
 mkdir -p auth logs uploads
-touch user_prefs.json
+echo '{}' > user_prefs.json
 
 docker compose up --build
 ```
