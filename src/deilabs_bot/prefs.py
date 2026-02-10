@@ -10,12 +10,38 @@ PREFS_FILE = "user_prefs.json"
 DEFAULT_LAB = "DEI/A | 230 DEI/A"
 
 
+def _initialize_empty_prefs_file() -> None:
+    """Best-effort write of an empty prefs object."""
+    try:
+        save_prefs({})
+    except OSError:
+        return
+
+
 def load_prefs() -> Dict[str, Any]:
     """Load user preferences from disk."""
     if not os.path.exists(PREFS_FILE):
         return {}
-    with open(PREFS_FILE, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+
+    try:
+        with open(PREFS_FILE, "r", encoding="utf-8") as handle:
+            content = handle.read()
+    except OSError:
+        return {}
+
+    if not content.strip():
+        _initialize_empty_prefs_file()
+        return {}
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    return data
 
 
 def save_prefs(prefs: Dict[str, Any]) -> None:
