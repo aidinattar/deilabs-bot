@@ -1,9 +1,10 @@
 import sqlite3
 from contextlib import closing
-from pathlib import Path
 from typing import Optional, List, Tuple
 
-DB_PATH = Path("logs") / "deilabs.sqlite3"
+from .paths import DB_PATH as DEFAULT_DB_PATH
+
+DB_PATH = DEFAULT_DB_PATH
 _INITIALIZED = False
 
 

@@ -4,9 +4,11 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional
 
+from .paths import LOGS_DIR
+
 
 class Logger:
-    LOG_DIR = "logs"
+    LOG_DIR = str(LOGS_DIR)
     LOG_FILE = "deilabs.log"
 
     @classmethod

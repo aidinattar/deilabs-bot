@@ -1,5 +1,6 @@
-import os
 from dataclasses import dataclass
+
+from .paths import AUTH_DIR
 
 DEILABS_BASE = "https://deilabs.dei.unipd.it"
 DEILABS_URL = f"{DEILABS_BASE}/"
@@ -22,5 +23,5 @@ class DeilabsConfig:
     @property
     def storage_state_path(self) -> str:
         """Path to the per-user Playwright storage state JSON."""
-        os.makedirs("auth", exist_ok=True)
-        return os.path.join("auth", f"auth_{self.user_id}.json")
+        AUTH_DIR.mkdir(parents=True, exist_ok=True)
+        return str(AUTH_DIR / f"auth_{self.user_id}.json")

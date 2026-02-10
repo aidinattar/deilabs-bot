@@ -20,7 +20,7 @@ Authentication must be performed manually once through the CLI in a real browser
   After login, the authenticated session is saved under:
 
   ```bash
-  auth/auth_<ID>.json
+  ./auth/auth_<ID>.json
   ```
 
 - **`deilabs status --user-id <ID>`**  
@@ -38,16 +38,16 @@ Authentication must be performed manually once through the CLI in a real browser
 User preferences are stored in:
 
 ```bash
-user_prefs.json
+./user_prefs.json
 ```
 
 Session files are stored in:
 
 ```bash
-auth/auth_<user_id>.json
+./auth/auth_<user_id>.json
 ```
 
-- Session uploads and command outcomes are logged to `logs/deilabs.sqlite3`
+- Session uploads and command outcomes are logged to `./logs/deilabs.sqlite3`
 - `session_uploads` tracks who uploaded which session file
 - `status_events` stores `/status`, `/punch`, and `/exit` results for future reporting
 - `current_status` keeps the latest known state (inside/outside/unknown), current lab, and entry time per user
@@ -59,6 +59,18 @@ pip install "python-telegram-bot[job-queue]"
 
 - Browser reuse (enabled by default): `DEILABS_REUSE_BROWSER=1` keeps a headless Firefox runtime warm to reduce latency while still using isolated contexts per user/session.
 - Navigation retry (for transient network errors): `DEILABS_NAV_RETRIES=2` and `DEILABS_NAV_RETRY_DELAY_MS=700`.
+
+Optional persistent root override (CLI and bot):
+
+```bash
+export DEILABS_DATA_DIR="/absolute/path/to/deilabs-data"
+```
+
+With `DEILABS_DATA_DIR`, the app stores:
+- `${DEILABS_DATA_DIR}/auth`
+- `${DEILABS_DATA_DIR}/uploads`
+- `${DEILABS_DATA_DIR}/logs`
+- `${DEILABS_DATA_DIR}/user_prefs.json`
 
 ---
 
@@ -86,7 +98,7 @@ deilabs login --user-id <ID>
 ```
 
 - The bot uses the same session file as the CLI.
-- When the session file is updated locally, forward it to the bot chat (as a document) to refresh the copy stored under `auth/auth_<user_id>.json`.
+- When the session file is updated locally, forward it to the bot chat (as a document) to refresh the copy stored under `./auth/auth_<user_id>.json`.
 
 ---
 
@@ -137,8 +149,8 @@ deilabs-bot/
 - Login must be done manually in a real browser.
 - The bot cannot perform authentication workflows.
 - The bot requires:
-  - a session file under `auth/`,
-  - a default lab set in `user_prefs.json`.
+  - a session file under `./auth/`,
+  - a default lab set in `./user_prefs.json`.
 
 ---
 
@@ -187,32 +199,38 @@ docker build -t deilabs-bot .
 Prepare persistent folders (sessions, logs, uploads, preferences) and launch the container:
 
 ```bash
-mkdir -p auth logs uploads
-echo '{}' > user_prefs.json
+docker volume create deilabs-data
 
 docker run --rm -it \
   -e TELEGRAM_BOT_TOKEN="YOUR_TOKEN" \
   -e BOT_TIMEZONE="Europe/Rome" \
   -e ADMIN_USER_IDS="123456789" \
-  -v "$(pwd)/auth:/app/auth" \
-  -v "$(pwd)/logs:/app/logs" \
-  -v "$(pwd)/uploads:/app/uploads" \
-  -v "$(pwd)/user_prefs.json:/app/user_prefs.json" \
+  -e DEILABS_DATA_DIR="/data" \
+  -v deilabs-data:/data \
   deilabs-bot
 ```
 
-Mounting these volumes ensures session files and logs persist across restarts. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) to run in a different zone.
+Using a named volume keeps data across reboots, container recreation, and project-folder changes. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) to run in a different zone.
 
 Alternatively, you can use Docker Compose:
 
 ```bash
-cp .env.example .env
-# edit .env and set TELEGRAM_BOT_TOKEN (and optional ADMIN_USER_IDS/BOT_TIMEZONE)
+# create/edit .env and set TELEGRAM_BOT_TOKEN (and optional ADMIN_USER_IDS/BOT_TIMEZONE)
 
-mkdir -p auth logs uploads
-echo '{}' > user_prefs.json
+docker compose up -d --build
+```
 
-docker compose up --build
+If you previously used bind mounts (`./auth`, `./logs`, `./uploads`, `./user_prefs.json`), migrate once into the named volume:
+
+```bash
+docker volume create deilabs-data
+docker run --rm \
+  -v deilabs-data:/data \
+  -v "$(pwd)/auth:/old/auth:ro" \
+  -v "$(pwd)/logs:/old/logs:ro" \
+  -v "$(pwd)/uploads:/old/uploads:ro" \
+  -v "$(pwd)/user_prefs.json:/old/user_prefs.json:ro" \
+  busybox sh -c 'mkdir -p /data/auth /data/logs /data/uploads && cp -a /old/auth/. /data/auth/ 2>/dev/null; cp -a /old/logs/. /data/logs/ 2>/dev/null; cp -a /old/uploads/. /data/uploads/ 2>/dev/null; cp /old/user_prefs.json /data/user_prefs.json 2>/dev/null || true'
 ```
 
 ### Docker Troubleshooting
@@ -223,6 +241,14 @@ docker compose up --build
   ```bash
   docker build --no-cache -t deilabs-bot .
   ```
+- Data missing after restart: check the mounted volume and never remove it by mistake:
+
+  ```bash
+  docker inspect deilabs-bot --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+  docker volume ls | grep deilabs-data
+  ```
+
+- Do not run `docker compose down -v` or `docker volume prune` unless you intentionally want to delete all persisted data.
 
 ---
 

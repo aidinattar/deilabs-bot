@@ -30,6 +30,7 @@ from .client import DeilabsClient
 from .logger import Logger
 from .labs   import LAB_CHOICES, LABS_PER_PAGE
 from .prefs import load_prefs, get_lab_for_user, set_lab_for_user, resolve_lab
+from .paths import AUTH_DIR as DEFAULT_AUTH_DIR, UPLOADS_DIR as DEFAULT_UPLOADS_DIR
 from .db import (
     init_db,
     log_session_upload,
@@ -40,8 +41,8 @@ from .db import (
     reset_all_statuses,
 )
 
-UPLOADS_DIR = Path("uploads")
-AUTH_DIR = Path("auth")
+UPLOADS_DIR = DEFAULT_UPLOADS_DIR
+AUTH_DIR = DEFAULT_AUTH_DIR
 SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

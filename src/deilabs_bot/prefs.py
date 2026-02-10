@@ -6,7 +6,9 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-PREFS_FILE = "user_prefs.json"
+from .paths import PREFS_FILE as DEFAULT_PREFS_FILE
+
+PREFS_FILE = str(DEFAULT_PREFS_FILE)
 DEFAULT_LAB = "DEI/A | 230 DEI/A"
 
 
@@ -46,6 +48,9 @@ def load_prefs() -> Dict[str, Any]:
 
 def save_prefs(prefs: Dict[str, Any]) -> None:
     """Persist user preferences to disk."""
+    parent = os.path.dirname(PREFS_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(PREFS_FILE, "w", encoding="utf-8") as handle:
         json.dump(prefs, handle, indent=2)
 

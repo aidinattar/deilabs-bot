@@ -9,12 +9,14 @@ from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from .paths import UPLOADS_DIR as DEFAULT_UPLOADS_DIR
+
 SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
 @dataclass(frozen=True)
 class UploadConfig:
-    uploads_dir: Path = Path("uploads")
+    uploads_dir: Path = DEFAULT_UPLOADS_DIR
     allowed_user_ids: Optional[set[int]] = None  # None = allow all
     max_bytes: int = 20 * 1024 * 1024  # 20MB (Telegram bot download limit can apply)
 

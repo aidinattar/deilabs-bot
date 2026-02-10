@@ -7,8 +7,10 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BOT_TIMEZONE: ${BOT_TIMEZONE:-Europe/Rome}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
+      DEILABS_DATA_DIR: /data
     volumes:
-      - ./auth:/app/auth
-      - ./logs:/app/logs
-      - ./uploads:/app/uploads
-      - ./user_prefs.json:/app/user_prefs.json
+      - deilabs-data:/data
+
+volumes:
+  deilabs-data:
+    name: deilabs-data
