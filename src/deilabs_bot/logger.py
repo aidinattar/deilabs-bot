@@ -1,6 +1,7 @@
 import os
 import json
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -24,7 +25,7 @@ class Logger:
         user_id: Optional[str] = None,
     ) -> None:
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level,
             "event": event,
             "message": message,
@@ -32,8 +33,14 @@ class Logger:
             "success": success,
             "user_id": user_id,
         }
-        with open(cls._log_path(), "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        try:
+            with open(cls._log_path(), "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError as exc:
+            print(
+                f"[WARNING] logger_write_failed: {exc}",
+                file=sys.stderr,
+            )
 
         # console log for dev convenience
         print(f"[{level}] {event}: {message} (user={user_id}, url={url})")
