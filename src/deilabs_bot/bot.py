@@ -159,6 +159,11 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _is_weekend_now() -> bool:
+    """Return True when current BOT_TIMEZONE day is Saturday or Sunday."""
+    return datetime.now(BOT_TIMEZONE).weekday() >= 5
+
+
 def _validate_session_file(path: Path) -> Tuple[bool, str]:
     """Lightweight validation to avoid storing malformed Playwright sessions."""
     try:
@@ -436,9 +441,14 @@ async def admin_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     if action == "ping":
         await query.edit_message_text("Sending reminder to known users...")
         result = await morning_ping_job(context)
+        weekend_note = ""
+        if result.get("skipped_weekend", 0):
+            weekend_note = f" skipped_weekend={result.get('skipped_weekend', 0)}"
         await query.edit_message_text(
-            f"Reminder sent. total={result['total']} sent={result['sent']} "
-            f"failed={result['failed']} skipped={result['skipped']}"
+            f"Reminder sent. total={result['total']} checked={result.get('checked', 0)} "
+            f"sent={result['sent']} failed={result['failed']} "
+            f"skipped_invalid={result['skipped']} skipped_inside={result.get('skipped_inside', 0)}"
+            f"{weekend_note}"
         )
         return
 
@@ -767,7 +777,40 @@ async def midnight_reset_job(context: ContextTypes.DEFAULT_TYPE):
 async def morning_ping_job(context: ContextTypes.DEFAULT_TYPE):
     users = get_known_users()
     if not users:
-        return {"total": 0, "sent": 0, "failed": 0, "skipped": 0}
+        return {
+            "total": 0,
+            "checked": 0,
+            "sent": 0,
+            "failed": 0,
+            "skipped": 0,
+            "skipped_inside": 0,
+            "skipped_weekend": 0,
+        }
+
+    if _is_weekend_now():
+        skipped_weekend = len(users)
+        Logger.log(
+            "scheduler_morning_ping_skip_weekend",
+            f"Skipping reminder on weekend. users={skipped_weekend}",
+            user_id=None,
+        )
+        return {
+            "total": skipped_weekend,
+            "checked": 0,
+            "sent": 0,
+            "failed": 0,
+            "skipped": 0,
+            "skipped_inside": 0,
+            "skipped_weekend": skipped_weekend,
+        }
+
+    checked = 0
+    for uid, username in users.items():
+        await _auto_status_update(uid, username)
+        checked += 1
+
+    snapshot = list_current_status_snapshot()
+    status_by_uid = {uid: status for uid, _, status, _, _, _ in snapshot}
 
     keyboard = ReplyKeyboardMarkup(
         [["/punch", "/status"], ["/login", "/setlab"]],
@@ -782,7 +825,11 @@ async def morning_ping_job(context: ContextTypes.DEFAULT_TYPE):
     sent = 0
     failed = 0
     skipped = 0
+    skipped_inside = 0
     for uid in users.keys():
+        if status_by_uid.get(uid) == "inside":
+            skipped_inside += 1
+            continue
         try:
             chat_id = int(uid)
         except ValueError:
@@ -799,7 +846,15 @@ async def morning_ping_job(context: ContextTypes.DEFAULT_TYPE):
                 level="ERROR",
                 user_id=uid,
             )
-    return {"total": len(users), "sent": sent, "failed": failed, "skipped": skipped}
+    return {
+        "total": len(users),
+        "checked": checked,
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+        "skipped_inside": skipped_inside,
+        "skipped_weekend": 0,
+    }
 
 
 async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):

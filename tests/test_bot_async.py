@@ -210,15 +210,46 @@ def test_upload_document_rejects_invalid_session(monkeypatch, tmp_path):
     assert upload_calls == []
 
 
-def test_morning_ping_job_sends_to_known_users(monkeypatch):
+def test_morning_ping_job_sends_only_to_users_not_inside(monkeypatch):
     fake_bot = FakeBot(payload={})
     context = SimpleNamespace(bot=fake_bot)
     monkeypatch.setattr(bot, "get_known_users", lambda: {"10": "u10", "11": None})
+    monkeypatch.setattr(bot, "_is_weekend_now", lambda: False)
+    calls = []
 
-    asyncio.run(bot.morning_ping_job(context))
+    async def fake_auto(uid, username):
+        calls.append((uid, username))
 
-    assert len(fake_bot.sent_messages) == 2
-    assert fake_bot.sent_messages[0][0] == 10
+    monkeypatch.setattr(bot, "_auto_status_update", fake_auto)
+    monkeypatch.setattr(
+        bot,
+        "list_current_status_snapshot",
+        lambda: [
+            ("10", "u10", "inside", "LAB-I", "2026-02-07T09:00:00", "2026-02-07 09:00:01"),
+            ("11", None, "outside", "", None, "2026-02-07 09:00:02"),
+        ],
+    )
+
+    result = asyncio.run(bot.morning_ping_job(context))
+
+    assert calls == [("10", "u10"), ("11", None)]
+    assert len(fake_bot.sent_messages) == 1
+    assert fake_bot.sent_messages[0][0] == 11
+    assert result["checked"] == 2
+    assert result["skipped_inside"] == 1
+
+
+def test_morning_ping_job_skips_everyone_on_weekend(monkeypatch):
+    fake_bot = FakeBot(payload={})
+    context = SimpleNamespace(bot=fake_bot)
+    monkeypatch.setattr(bot, "get_known_users", lambda: {"10": "u10", "11": None})
+    monkeypatch.setattr(bot, "_is_weekend_now", lambda: True)
+
+    result = asyncio.run(bot.morning_ping_job(context))
+
+    assert len(fake_bot.sent_messages) == 0
+    assert result["checked"] == 0
+    assert result["skipped_weekend"] == 2
 
 
 def test_midday_status_job_calls_auto_update(monkeypatch):

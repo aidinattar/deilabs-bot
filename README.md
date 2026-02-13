@@ -57,6 +57,10 @@ Session files are stored in:
 pip install "python-telegram-bot[job-queue]"
 ```
 
+Reminder behavior at 10:00:
+- Saturday/Sunday: no reminder is sent.
+- Monday-Friday: the bot first runs an automatic status check, then sends the reminder only to users who are not `inside`.
+
 - Browser reuse (enabled by default): `DEILABS_REUSE_BROWSER=1` keeps a headless Firefox runtime warm to reduce latency while still using isolated contexts per user/session.
 - Navigation retry (for transient network errors): `DEILABS_NAV_RETRIES=2` and `DEILABS_NAV_RETRY_DELAY_MS=700`.
 
