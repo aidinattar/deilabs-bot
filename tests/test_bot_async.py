@@ -276,6 +276,42 @@ def test_admin_cmd_requires_authorization(monkeypatch):
     assert msg.texts[-1] == "Not authorized."
 
 
+def test_broadcast_cmd_requires_authorization(monkeypatch):
+    update, context, msg = _build_update_and_context(user_id=50)
+    monkeypatch.setattr(bot, "ADMIN_USER_IDS", {"1"})
+
+    asyncio.run(bot.broadcast_cmd(update, context))
+
+    assert msg.texts[-1] == "Not authorized."
+
+
+def test_broadcast_cmd_requires_message(monkeypatch):
+    update, context, msg = _build_update_and_context(user_id=1)
+    monkeypatch.setattr(bot, "ADMIN_USER_IDS", {"1"})
+    context.args = []
+
+    asyncio.run(bot.broadcast_cmd(update, context))
+
+    assert msg.texts[-1] == "Usage: /broadcast <message>"
+
+
+def test_broadcast_cmd_sends_to_known_users(monkeypatch):
+    update, context, msg = _build_update_and_context(user_id=1)
+    monkeypatch.setattr(bot, "ADMIN_USER_IDS", {"1"})
+    monkeypatch.setattr(bot, "get_known_users", lambda: {"10": "u10", "11": None, "x": "bad"})
+    context.args = ["Maintenance", "at", "13:30"]
+
+    asyncio.run(bot.broadcast_cmd(update, context))
+
+    assert len(context.bot.sent_messages) == 2
+    assert context.bot.sent_messages[0][0] == 10
+    assert context.bot.sent_messages[1][0] == 11
+    assert context.bot.sent_messages[0][1].startswith("[Admin message]\nMaintenance at 13:30")
+    assert "Broadcast completed." in msg.texts[-1]
+    assert "sent=2" in msg.texts[-1]
+    assert "skipped=1" in msg.texts[-1]
+
+
 def test_admin_action_ping(monkeypatch):
     update, context, query = _build_callback_update(user_id=1, data="admin:ping")
     monkeypatch.setattr(bot, "ADMIN_USER_IDS", {"1"})

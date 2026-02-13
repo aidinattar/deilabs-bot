@@ -398,6 +398,53 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not update.message:
+        return
+
+    uid = str(user.id)
+    if not _is_admin(uid):
+        await update.message.reply_text("Not authorized.")
+        return
+
+    payload = " ".join(context.args).strip()
+    if not payload:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+
+    users = get_known_users()
+    if not users:
+        await update.message.reply_text("No known users found.")
+        return
+
+    sent = 0
+    failed = 0
+    skipped = 0
+    text = f"[Admin message]\n{payload}"
+    for target_uid in users.keys():
+        try:
+            chat_id = int(target_uid)
+        except ValueError:
+            skipped += 1
+            continue
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            Logger.log(
+                "admin_broadcast_error",
+                f"Could not send broadcast to {target_uid}: {exc}",
+                level="ERROR",
+                user_id=target_uid,
+            )
+
+    await update.message.reply_text(
+        f"Broadcast completed. total={len(users)} sent={sent} failed={failed} skipped={skipped}"
+    )
+
+
 async def _render_admin_status(query, state_filter: str, page: int):
     rows = list_current_status_snapshot()
     page_rows, page, max_page, total, normalized_filter = _slice_status_rows(rows, state_filter, page)
@@ -887,6 +934,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("login", login_info))
     application.add_handler(CommandHandler("admin", admin_cmd))
+    application.add_handler(CommandHandler("broadcast", broadcast_cmd))
     application.add_handler(CommandHandler("setlab", setlab_cmd))
     application.add_handler(CommandHandler("status", status_cmd))
     application.add_handler(CommandHandler("punch", punch_cmd))

@@ -92,6 +92,7 @@ The Telegram bot provides:
   If used with no arguments, it presents a keyboard with multiple laboratory options.
 - **Document upload** – Send the `auth_<user_id>.json` file as a *document* in the chat to update your session without touching the server filesystem.
 - **`/admin`** – Admin-only panel to manually trigger reminder, global status check, reset, and current-status table view (with filters and pagination).
+- **`/broadcast <message>`** – Admin-only command to send a message to all known users.
 
 ### Notes
 
