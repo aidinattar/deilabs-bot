@@ -11,6 +11,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 
 dependencies = [
+    "Flask>=3.0",
     "playwright",
     "python-telegram-bot[job-queue]>=21.0",
 ]
@@ -25,3 +26,4 @@ where = ["src"]
 
 [project.scripts]
 deilabs = "deilabs_bot.cli:main"
+deilabs-web = "deilabs_bot.web:main"

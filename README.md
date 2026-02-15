@@ -4,6 +4,7 @@ This project provides:
 
 1. A **Python CLI** to interact with the [DeiLabs platform](https://deilabs.dei.unipd.it/) using Playwright.
 2. A **Telegram bot** that can check your presence status, enter/exit a laboratory, and manage your preferences, using a previously saved authenticated session.
+3. A **Flask web dashboard** to visualize online/offline users from the shared SQLite status table.
 
 **Important:**  
 The bot does *not* handle UniPD credentials and does *not* perform automatic login.  
@@ -107,6 +108,32 @@ deilabs login --user-id <ID>
 
 ---
 
+## Web Dashboard
+
+The web dashboard reads `current_status` from the same SQLite database and renders a live online/offline page.
+
+Run locally:
+
+```bash
+python -m deilabs_bot.web
+# or
+deilabs-web
+```
+
+Then open:
+
+```bash
+http://127.0.0.1:8080
+```
+
+Useful env vars:
+- `DEILABS_WEB_HOST` (default `0.0.0.0`)
+- `DEILABS_WEB_PORT` (default `8080`)
+- `DEILABS_WEB_REFRESH_SECONDS` (default `30`)
+- `DEILABS_WEB_TITLE` (default `DeiLabs Presence Dashboard`)
+
+---
+
 ## Project Structure
 
 ```css
@@ -115,6 +142,7 @@ deilabs-bot/
 │  ├─ deilabs_bot/
 │  │  ├─ bot.py            # Telegram bot
 │  │  ├─ client.py         # Playwright client
+│  │  ├─ web.py            # Flask status dashboard
 │  │  ├─ labs.py           # Lab list + pagination
 │  │  ├─ prefs.py          # User preference manager
 │  │
@@ -223,6 +251,12 @@ Alternatively, you can use Docker Compose:
 # create/edit .env and set TELEGRAM_BOT_TOKEN (and optional ADMIN_USER_IDS/BOT_TIMEZONE)
 
 docker compose up -d --build
+```
+
+With compose, the dashboard is exposed on:
+
+```bash
+http://127.0.0.1:${DEILABS_WEB_PORT:-8080}
 ```
 
 If you previously used bind mounts (`./auth`, `./logs`, `./uploads`, `./user_prefs.json`), migrate once into the named volume:
