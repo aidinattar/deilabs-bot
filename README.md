@@ -52,7 +52,7 @@ Session files are stored in:
 - `session_uploads` tracks who uploaded which session file
 - `status_events` stores `/status`, `/punch`, and `/exit` results for future reporting
 - `current_status` keeps the latest known state (inside/outside/unknown), current lab, and entry time per user
-- Scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) require installing the Telegram job queue extra:
+- Scheduled jobs (midnight reset, 10:00 reminder, hourly auto-status Monday-Friday) require installing the Telegram job queue extra:
 
 ```bash
 pip install "python-telegram-bot[job-queue]"
@@ -243,7 +243,7 @@ docker run --rm -it \
   deilabs-bot
 ```
 
-Using a named volume keeps data across reboots, container recreation, and project-folder changes. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status) to run in a different zone.
+Using a named volume keeps data across reboots, container recreation, and project-folder changes. Adjust `BOT_TIMEZONE` if you need the scheduled jobs (midnight reset, 10:00 reminder, hourly auto-status Monday-Friday) to run in a different zone.
 
 Alternatively, you can use Docker Compose:
 
@@ -301,7 +301,7 @@ The system supports:
 - Lab selection via command or Telegram inline keyboards.
 - Session upload via Telegram document (`auth_<user_id>.json`).
 - SQLite logging (`session_uploads`, `status_events`, `current_status`).
-- Scheduled jobs (midnight reset, 10:00 reminder, 13:00 auto-status).
+- Scheduled jobs (midnight reset, 10:00 reminder, hourly auto-status Monday-Friday).
 - Consistent session handling per user.
 
 ---
