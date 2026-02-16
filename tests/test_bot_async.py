@@ -267,6 +267,43 @@ def test_midday_status_job_calls_auto_update(monkeypatch):
     assert ("21", None) in calls
 
 
+def test_weekday_hourly_status_job_runs_on_weekday(monkeypatch):
+    context = SimpleNamespace(bot=FakeBot(payload={}))
+    monkeypatch.setattr(bot, "_is_weekend_now", lambda: False)
+
+    async def fake_midday(_context):
+        return {"total": 2, "checked": 2}
+
+    monkeypatch.setattr(bot, "midday_status_job", fake_midday)
+    result = asyncio.run(bot.weekday_hourly_status_job(context))
+
+    assert result["total"] == 2
+    assert result["checked"] == 2
+    assert result["skipped_weekend"] == 0
+
+
+def test_weekday_hourly_status_job_skips_on_weekend(monkeypatch):
+    context = SimpleNamespace(bot=FakeBot(payload={}))
+    monkeypatch.setattr(bot, "_is_weekend_now", lambda: True)
+    monkeypatch.setattr(bot, "get_known_users", lambda: {"20": "u20", "21": None})
+    midday_calls = []
+    log_calls = []
+
+    async def fake_midday(_context):
+        midday_calls.append(True)
+        return {"total": 2, "checked": 2}
+
+    monkeypatch.setattr(bot, "midday_status_job", fake_midday)
+    monkeypatch.setattr(bot.Logger, "log", lambda *args, **kwargs: log_calls.append((args, kwargs)))
+    result = asyncio.run(bot.weekday_hourly_status_job(context))
+
+    assert result["total"] == 2
+    assert result["checked"] == 0
+    assert result["skipped_weekend"] == 2
+    assert midday_calls == []
+    assert log_calls
+
+
 def test_admin_cmd_requires_authorization(monkeypatch):
     update, context, msg = _build_update_and_context(user_id=50)
     monkeypatch.setattr(bot, "ADMIN_USER_IDS", {"1"})

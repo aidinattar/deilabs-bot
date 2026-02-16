@@ -3,7 +3,7 @@ import re
 import json
 import shutil
 import asyncio
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta
 from functools import partial
 from typing import Dict, Optional, Tuple
 from pathlib import Path
@@ -80,7 +80,7 @@ def _build_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Send 10:00 Reminder", callback_data="admin:ping")],
-            [InlineKeyboardButton("Run 13:00 Status Check", callback_data="admin:check")],
+            [InlineKeyboardButton("Run Status Check Now", callback_data="admin:check")],
             [InlineKeyboardButton("Reset All to Outside", callback_data="admin:reset")],
             [InlineKeyboardButton("View Current Status", callback_data="admin:status")],
         ]
@@ -162,6 +162,13 @@ def _timestamp() -> str:
 def _is_weekend_now() -> bool:
     """Return True when current BOT_TIMEZONE day is Saturday or Sunday."""
     return datetime.now(BOT_TIMEZONE).weekday() >= 5
+
+
+def _seconds_until_next_hour() -> float:
+    """Return the delay in seconds before the next top-of-hour boundary."""
+    now = datetime.now(BOT_TIMEZONE)
+    next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return max(1.0, (next_hour - now).total_seconds())
 
 
 def _validate_session_file(path: Path) -> Tuple[bool, str]:
@@ -916,6 +923,21 @@ async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):
     return {"total": len(users), "checked": checked}
 
 
+async def weekday_hourly_status_job(context: ContextTypes.DEFAULT_TYPE):
+    if _is_weekend_now():
+        skipped_weekend = len(get_known_users())
+        if skipped_weekend:
+            Logger.log(
+                "scheduler_hourly_status_skip_weekend",
+                f"Skipping hourly status check on weekend. users={skipped_weekend}",
+                user_id=None,
+            )
+        return {"total": skipped_weekend, "checked": 0, "skipped_weekend": skipped_weekend}
+
+    result = await midday_status_job(context)
+    return {**result, "skipped_weekend": 0}
+
+
 async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     Logger.log(
         "bot_unhandled_exception",
@@ -963,7 +985,11 @@ def main():
     else:
         job_queue.run_daily(midnight_reset_job, time=time(hour=0, minute=0, tzinfo=BOT_TIMEZONE))
         job_queue.run_daily(morning_ping_job, time=time(hour=10, minute=0, tzinfo=BOT_TIMEZONE))
-        job_queue.run_daily(midday_status_job, time=time(hour=13, minute=0, tzinfo=BOT_TIMEZONE))
+        job_queue.run_repeating(
+            weekday_hourly_status_job,
+            interval=timedelta(hours=1),
+            first=_seconds_until_next_hour(),
+        )
     application.run_polling()
 
 
