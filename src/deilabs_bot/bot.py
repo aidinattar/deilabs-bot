@@ -3,7 +3,7 @@ import re
 import json
 import shutil
 import asyncio
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta
 from functools import partial
 from typing import Dict, Optional, Tuple
 from pathlib import Path
@@ -55,6 +55,12 @@ try:
     STATUS_PAGE_SIZE = max(1, int(os.getenv("ADMIN_STATUS_PAGE_SIZE", "10")))
 except ValueError:
     STATUS_PAGE_SIZE = 10
+try:
+    STATUS_CHECK_INTERVAL_MINUTES = max(
+        1, int(os.getenv("STATUS_CHECK_INTERVAL_MINUTES", "5"))
+    )
+except ValueError:
+    STATUS_CHECK_INTERVAL_MINUTES = 5
 
 init_db()
 
@@ -80,7 +86,7 @@ def _build_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Send 10:00 Reminder", callback_data="admin:ping")],
-            [InlineKeyboardButton("Run 13:00 Status Check", callback_data="admin:check")],
+            [InlineKeyboardButton("Run Status Check Now", callback_data="admin:check")],
             [InlineKeyboardButton("Reset All to Outside", callback_data="admin:reset")],
             [InlineKeyboardButton("View Current Status", callback_data="admin:status")],
         ]
@@ -963,7 +969,11 @@ def main():
     else:
         job_queue.run_daily(midnight_reset_job, time=time(hour=0, minute=0, tzinfo=BOT_TIMEZONE))
         job_queue.run_daily(morning_ping_job, time=time(hour=10, minute=0, tzinfo=BOT_TIMEZONE))
-        job_queue.run_daily(midday_status_job, time=time(hour=13, minute=0, tzinfo=BOT_TIMEZONE))
+        job_queue.run_repeating(
+            midday_status_job,
+            interval=timedelta(minutes=STATUS_CHECK_INTERVAL_MINUTES),
+            first=10,
+        )
     application.run_polling()
 
 

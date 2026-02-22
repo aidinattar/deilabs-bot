@@ -228,7 +228,7 @@ def create_app() -> Flask:
         "DeiLabs Presence Dashboard",
     )
     app.config["DEILABS_WEB_REFRESH_SECONDS"] = int(
-        os.getenv("DEILABS_WEB_REFRESH_SECONDS", "30")
+        os.getenv("DEILABS_WEB_REFRESH_SECONDS", "300")
     )
 
     @app.get("/")
