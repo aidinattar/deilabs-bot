@@ -117,7 +117,7 @@ Dashboard data comes from `current_status`.
 - `10:00` (Mon-Fri only):
   - run status check
   - send reminder only to users not already `inside`
-- recurring status check every 5 minutes
+- recurring status check every 5 minutes (Mon-Fri, 07:30-20:00)
 
 ### Telegram commands
 
