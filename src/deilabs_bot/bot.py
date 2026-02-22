@@ -62,6 +62,9 @@ try:
 except ValueError:
     STATUS_CHECK_INTERVAL_MINUTES = 5
 
+AUTO_CHECK_START_MINUTES = 7 * 60 + 30
+AUTO_CHECK_END_MINUTES = 20 * 60
+
 init_db()
 
 
@@ -168,6 +171,16 @@ def _timestamp() -> str:
 def _is_weekend_now() -> bool:
     """Return True when current BOT_TIMEZONE day is Saturday or Sunday."""
     return datetime.now(BOT_TIMEZONE).weekday() >= 5
+
+
+def _is_auto_check_window_now() -> bool:
+    """Return True only on weekdays between 07:30 and 20:00 (BOT_TIMEZONE)."""
+    if _is_weekend_now():
+        return False
+
+    now = datetime.now(BOT_TIMEZONE)
+    minute_of_day = now.hour * 60 + now.minute
+    return AUTO_CHECK_START_MINUTES <= minute_of_day <= AUTO_CHECK_END_MINUTES
 
 
 def _seconds_until_next_hour() -> float:
@@ -514,7 +527,7 @@ async def admin_action_button(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if action == "check":
         await query.edit_message_text("Running status check for known users...")
-        result = await midday_status_job(context)
+        result = await _run_status_checks_for_known_users()
         await query.edit_message_text(
             f"Status check completed. total={result['total']} checked={result['checked']}"
         )
@@ -917,7 +930,7 @@ async def morning_ping_job(context: ContextTypes.DEFAULT_TYPE):
     }
 
 
-async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):
+async def _run_status_checks_for_known_users():
     users = get_known_users()
     if not users:
         return {"total": 0, "checked": 0}
@@ -929,19 +942,40 @@ async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):
     return {"total": len(users), "checked": checked}
 
 
+async def midday_status_job(context: ContextTypes.DEFAULT_TYPE):
+    _ = context
+    if not _is_auto_check_window_now():
+        return {"total": len(get_known_users()), "checked": 0}
+
+    return await _run_status_checks_for_known_users()
+
+
 async def weekday_hourly_status_job(context: ContextTypes.DEFAULT_TYPE):
+    users_count = len(get_known_users())
     if _is_weekend_now():
-        skipped_weekend = len(get_known_users())
-        if skipped_weekend:
+        if users_count:
             Logger.log(
                 "scheduler_hourly_status_skip_weekend",
-                f"Skipping hourly status check on weekend. users={skipped_weekend}",
+                f"Skipping hourly status check on weekend. users={users_count}",
                 user_id=None,
             )
-        return {"total": skipped_weekend, "checked": 0, "skipped_weekend": skipped_weekend}
+        return {
+            "total": users_count,
+            "checked": 0,
+            "skipped_weekend": users_count,
+            "skipped_window": 0,
+        }
 
-    result = await midday_status_job(context)
-    return {**result, "skipped_weekend": 0}
+    if not _is_auto_check_window_now():
+        return {
+            "total": users_count,
+            "checked": 0,
+            "skipped_weekend": 0,
+            "skipped_window": users_count,
+        }
+
+    result = await _run_status_checks_for_known_users()
+    return {**result, "skipped_weekend": 0, "skipped_window": 0}
 
 
 async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
