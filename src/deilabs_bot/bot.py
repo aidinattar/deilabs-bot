@@ -55,6 +55,12 @@ try:
     STATUS_PAGE_SIZE = max(1, int(os.getenv("ADMIN_STATUS_PAGE_SIZE", "10")))
 except ValueError:
     STATUS_PAGE_SIZE = 10
+try:
+    STATUS_CHECK_INTERVAL_MINUTES = max(
+        1, int(os.getenv("STATUS_CHECK_INTERVAL_MINUTES", "5"))
+    )
+except ValueError:
+    STATUS_CHECK_INTERVAL_MINUTES = 5
 
 init_db()
 
@@ -986,9 +992,9 @@ def main():
         job_queue.run_daily(midnight_reset_job, time=time(hour=0, minute=0, tzinfo=BOT_TIMEZONE))
         job_queue.run_daily(morning_ping_job, time=time(hour=10, minute=0, tzinfo=BOT_TIMEZONE))
         job_queue.run_repeating(
-            weekday_hourly_status_job,
-            interval=timedelta(hours=1),
-            first=_seconds_until_next_hour(),
+            midday_status_job,
+            interval=timedelta(minutes=STATUS_CHECK_INTERVAL_MINUTES),
+            first=10,
         )
     application.run_polling()
 
